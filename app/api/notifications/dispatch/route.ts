@@ -162,12 +162,14 @@ export async function POST(request: NextRequest) {
           if (!existing) {
             let status: "sent" | "failed" = "sent";
             let attempts = 1;
+            let error: string | undefined;
 
             try {
               await sendPushNotification(record.push.subscription, record.walletAddress, period);
-            } catch {
+            } catch (err) {
               status = "failed";
               attempts = 4; // 1 initial + 3 retries
+              error = err instanceof Error ? err.message : String(err);
             }
 
             const logEntry: DispatchLogEntry = {
@@ -178,6 +180,7 @@ export async function POST(request: NextRequest) {
               sentAt: new Date().toISOString(),
               status,
               attempts,
+              ...(error && { error }),
             };
             await kvSet(logKey, logEntry);
             if (status === "sent") dispatched++;
@@ -196,6 +199,7 @@ export async function POST(request: NextRequest) {
           if (!existing) {
             let status: "sent" | "failed" = "sent";
             let attempts = 1;
+            let error: string | undefined;
 
             try {
               await sendEmailNotification(
@@ -203,9 +207,10 @@ export async function POST(request: NextRequest) {
                 record.email.unsubscribeToken,
                 period
               );
-            } catch {
+            } catch (err) {
               status = "failed";
               attempts = 4;
+              error = err instanceof Error ? err.message : String(err);
             }
 
             const logEntry: DispatchLogEntry = {
@@ -216,6 +221,7 @@ export async function POST(request: NextRequest) {
               sentAt: new Date().toISOString(),
               status,
               attempts,
+              ...(error && { error }),
             };
             await kvSet(logKey, logEntry);
             if (status === "sent") dispatched++;
