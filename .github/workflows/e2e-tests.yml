@@ -1,0 +1,60 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches:
+      - "**"
+
+# Avoid running heavy E2E suites in parallel on rapid pushes to the same PR.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright E2E (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Validate environment variables
+        run: node scripts/validate-env.js
+
+      - name: Run E2E tests
+        # PLAYWRIGHT_BASE_URL is intentionally unset so the Playwright webServer
+        # starts the Next.js dev server itself (see playwright.config.ts).
+        # CI env enables retries + single worker in the config for reliability.
+        run: pnpm test:e2e
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report & traces
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30

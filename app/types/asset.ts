@@ -1,27 +1,32 @@
 /**
+ 
  * Asset type definitions for Stellar wrap
- */
+*/
 
-/**
+/*
  * Represents resolved asset metadata
  */
-export interface AssetMetadata {
+export type AssetMetadata = {
   code: string;
   issuer?: string;
   name: string;
-  logo?: string;
   domain?: string;
   description?: string;
   isNative: boolean;
-}
+} & (
+  | { logo?: undefined; logoAlt?: undefined }
+  | { logo: string; logoAlt: string }
+);
 
-/**
+/*
  * Asset cache entry with expiration
  */
 export interface AssetCacheEntry {
   metadata: AssetMetadata;
   timestamp: number;
-  ttl: number; // in milliseconds
+  ttl: number; // in milliseconds 
+  /** Bumped when issuer metadata schema changes; mismatched entries are dropped. */
+  version: number;
 }
 
 /**
@@ -47,3 +52,8 @@ export interface AssetResolutionResult {
   metadata?: AssetMetadata;
   error?: string;
 }
+
+/**
+ * Variants for the AssetCard component, used for Storybook stories.
+ */
+export type AssetCardVariant = 'primary' | 'secondary' | 'disabled' | 'loading';

@@ -25,7 +25,8 @@ import {
 
 // Mock implementation placeholder - will be replaced with actual service
 // This allows tests to be written before implementation
-let indexerService: IndexerService;
+let indexerService!: IndexerService;
+
 
 describe('IndexerService', () => {
   beforeEach(() => {

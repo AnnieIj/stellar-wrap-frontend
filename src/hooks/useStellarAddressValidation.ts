@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Horizon } from 'stellar-sdk';
 import { Network, RPC_ENDPOINTS } from '../config';
 import { validateStellarAddress, ValidationState } from '../utils/validateStellarAddress';
+import { logger } from '../../app/utils/logger';
+
+const log = logger.child('useStellarAddressValidation');
 
 interface UseStellarAddressValidationProps {
   initialAddress?: string;
@@ -172,7 +175,7 @@ export const useStellarAddressValidation = ({
       } catch (error) {
         if (!isMounted) return;
 
-        console.error("Account validation error:", error);
+        log.error("Account validation error:", error);
         
         const err = error as { response?: { status?: number } };
         if (err?.response?.status === 404) {

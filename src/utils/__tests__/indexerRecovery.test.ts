@@ -8,6 +8,7 @@ import {
   BASE_BACKOFF_MS,
 } from "@/app/types/indexingRecovery";
 import { STEP_ORDER } from "@/app/types/indexing";
+import { useRateLimitStore } from "@/src/store/rateLimitStore";
 
 
 describe("classifyError", () => {
@@ -118,6 +119,58 @@ describe("MAX_RETRIES", () => {
   });
 });
 
+
+describe("RateLimitStore banner visibility", () => {
+  beforeEach(() => {
+    useRateLimitStore.getState().reset();
+  });
+
+  it("initial state has banner hidden (isRateLimited false, retryAttempt 0)", () => {
+    const state = useRateLimitStore.getState();
+    expect(state.isRateLimited).toBe(false);
+    expect(state.retryAttempt).toBe(0);
+  });
+
+  it("reset clears isRateLimited and retryAttempt", () => {
+    useRateLimitStore.getState().setRateLimited(true, Date.now() + 10000);
+    useRateLimitStore.getState().setRetryAttempt(3);
+    useRateLimitStore.getState().setMessage("Rate limited");
+
+    useRateLimitStore.getState().reset();
+
+    const state = useRateLimitStore.getState();
+    expect(state.isRateLimited).toBe(false);
+    expect(state.retryAttempt).toBe(0);
+    expect(state.message).toBeNull();
+  });
+
+  it("banner visibility condition (isRateLimited || retryAttempt > 0) is false after reset", () => {
+    useRateLimitStore.getState().setRateLimited(true, Date.now() + 10000);
+    useRateLimitStore.getState().setRetryAttempt(3);
+
+    useRateLimitStore.getState().reset();
+
+    const { isRateLimited, retryAttempt } = useRateLimitStore.getState();
+    const showBanner = isRateLimited || retryAttempt > 0;
+    expect(showBanner).toBe(false);
+  });
+
+  it("banner visibility condition is true when rate limited", () => {
+    useRateLimitStore.getState().setRateLimited(true, Date.now() + 10000);
+
+    const { isRateLimited, retryAttempt } = useRateLimitStore.getState();
+    const showBanner = isRateLimited || retryAttempt > 0;
+    expect(showBanner).toBe(true);
+  });
+
+  it("banner visibility condition is true during retry", () => {
+    useRateLimitStore.getState().setRetryAttempt(2);
+
+    const { isRateLimited, retryAttempt } = useRateLimitStore.getState();
+    const showBanner = isRateLimited || retryAttempt > 0;
+    expect(showBanner).toBe(true);
+  });
+});
 
 describe("STEP_ORDER", () => {
   it("starts with initializing", () => {

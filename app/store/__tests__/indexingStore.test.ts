@@ -1,5 +1,5 @@
 /**
- * Unit Tests for indexingStore (Zustand)
+ * Unit Tests for wrapStore indexing slice (Zustand)
  *
  * Run with: npx tsx app/store/__tests__/indexingStore.test.ts
  *
@@ -32,18 +32,20 @@ const STEP_ORDER: IndexingStep[] = [
 
 interface IndexingError { step: IndexingStep; message: string; recoverable: boolean; }
 
-interface IndexingStoreState {
+interface WriteStoreState {
+    // Indexing state (mirrors the slice now in wrapStore)
     currentStep: IndexingStep | null;
     stepProgress: Record<IndexingStep, number>;
     completedStepRecord: Record<IndexingStep, boolean>;
     overallProgress: number; completedSteps: number; totalSteps: number;
     startTime: number | null; estimatedTimeRemaining: number | null;
-    error: IndexingError | null; isLoading: boolean; isCancelled: boolean;
+    indexingError: IndexingError | null; isLoading: boolean; isCancelled: boolean;
+    // Indexing actions
     setCurrentStep: (step: IndexingStep | null) => void;
     setStepProgress: (step: IndexingStep, progress: number) => void;
     updateOverallProgress: () => void;
-    setError: (step: IndexingStep, message: string, recoverable?: boolean) => void;
-    clearError: () => void;
+    setIndexingError: (step: IndexingStep, message: string, recoverable?: boolean) => void;
+    clearIndexingError: () => void;
     startIndexing: () => void;
     completeStep: (step: IndexingStep) => void;
     cancelIndexing: () => void;
@@ -65,15 +67,19 @@ const initialState = {
     completedStepRecord: { ...initialCompletedStepRecord },
     overallProgress: 0, completedSteps: 0, totalSteps: STEP_ORDER.length,
     startTime: null as number | null, estimatedTimeRemaining: null as number | null,
-    error: null as IndexingError | null, isLoading: false, isCancelled: false,
+    indexingError: null as IndexingError | null, isLoading: false, isCancelled: false,
 };
 
-const useIndexingStore = create<IndexingStoreState>((set, get) => ({
+const useWrapStore = create<WriteStoreState>((set, get) => ({
     ...initialState,
     setCurrentStep: (step) => { set({ currentStep: step }); get().updateOverallProgress(); },
     setStepProgress: (step, progress) => {
-        const clamped = Math.max(0, Math.min(100, progress));
-        set((state) => ({ stepProgress: { ...state.stepProgress, [step]: clamped } }));
+        const state = get();
+        if (state.completedStepRecord[step]) return;
+        const next = Math.max(0, Math.min(100, progress));
+        const current = state.stepProgress[step] ?? 0;
+        if (next < current) return;
+        set((s) => ({ stepProgress: { ...s.stepProgress, [step]: next } }));
         get().updateOverallProgress();
     },
     updateOverallProgress: () => {
@@ -85,8 +91,8 @@ const useIndexingStore = create<IndexingStoreState>((set, get) => ({
         });
         set({ overallProgress: Math.round(totalProgress) });
     },
-    setError: (step, message, recoverable = true) => { set({ error: { step, message, recoverable }, isLoading: false }); },
-    clearError: () => { set({ error: null }); },
+    setIndexingError: (step, message, recoverable = true) => { set({ indexingError: { step, message, recoverable }, isLoading: false }); },
+    clearIndexingError: () => { set({ indexingError: null }); },
     startIndexing: () => { set({ ...initialState, isLoading: true, startTime: Date.now(), totalSteps: STEP_ORDER.length, completedSteps: 0 }); },
     completeStep: (step) => {
         set((state) => {
@@ -121,22 +127,22 @@ function section(name: string): void {
 
 section('Initial state');
 {
-    const state = useIndexingStore.getState();
+    const state = useWrapStore.getState();
     assert(state.currentStep === null, 'currentStep starts null');
     assert(state.overallProgress === 0, 'overallProgress starts 0');
     assert(state.completedSteps === 0, 'completedSteps starts 0');
     assert(state.totalSteps === 7, 'totalSteps is 7');
     assert(state.isLoading === false, 'isLoading starts false');
     assert(state.isCancelled === false, 'isCancelled starts false');
-    assert(state.error === null, 'error starts null');
+    assert(state.indexingError === null, 'indexingError starts null');
 }
 
 // ─── startIndexing ──────────────────────────────────────────────────────────
 
 section('startIndexing');
 {
-    useIndexingStore.getState().startIndexing();
-    const state = useIndexingStore.getState();
+    useWrapStore.getState().startIndexing();
+    const state = useWrapStore.getState();
     assert(state.isLoading === true, 'startIndexing: isLoading is true');
     assert(state.startTime !== null, 'startIndexing: startTime is set');
     assert(state.completedSteps === 0, 'startIndexing: completedSteps reset to 0');
@@ -147,44 +153,79 @@ section('startIndexing');
 
 section('setCurrentStep');
 {
-    useIndexingStore.getState().setCurrentStep('initializing');
-    assert(useIndexingStore.getState().currentStep === 'initializing', 'currentStep set');
+    useWrapStore.getState().setCurrentStep('initializing');
+    assert(useWrapStore.getState().currentStep === 'initializing', 'currentStep set');
 
-    useIndexingStore.getState().setCurrentStep('fetching-transactions');
-    assert(useIndexingStore.getState().currentStep === 'fetching-transactions', 'currentStep updated');
+    useWrapStore.getState().setCurrentStep('fetching-transactions');
+    assert(useWrapStore.getState().currentStep === 'fetching-transactions', 'currentStep updated');
 }
 
 // ─── setStepProgress ────────────────────────────────────────────────────────
 
 section('setStepProgress');
 {
-    useIndexingStore.getState().setStepProgress('initializing', 50);
-    assert(useIndexingStore.getState().stepProgress.initializing === 50, 'step progress set to 50');
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
 
-    // Clamped to 0-100
-    useIndexingStore.getState().setStepProgress('initializing', 150);
-    assert(useIndexingStore.getState().stepProgress.initializing === 100, 'step progress clamped to 100');
+    useWrapStore.getState().setStepProgress('initializing', 50);
+    assert(useWrapStore.getState().stepProgress.initializing === 50, 'step progress set to 50');
 
-    useIndexingStore.getState().setStepProgress('initializing', -10);
-    assert(useIndexingStore.getState().stepProgress.initializing === 0, 'step progress clamped to 0');
+    // Clamped to 0-100 (upper)
+    useWrapStore.getState().setStepProgress('initializing', 150);
+    assert(useWrapStore.getState().stepProgress.initializing === 100, 'step progress clamped to 100');
+}
+
+// ─── Monotonic / out-of-order progress ──────────────────────────────────────
+
+section('Monotonic progress — ignore regressions and stale events');
+{
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
+
+    useWrapStore.getState().setStepProgress('fetching-transactions', 40);
+    useWrapStore.getState().setStepProgress('fetching-transactions', 70);
+    assert(
+        useWrapStore.getState().stepProgress['fetching-transactions'] === 70,
+        'progress advances 40 → 70',
+    );
+
+    // Late / out-of-order lower value must not regress
+    useWrapStore.getState().setStepProgress('fetching-transactions', 55);
+    assert(
+        useWrapStore.getState().stepProgress['fetching-transactions'] === 70,
+        'out-of-order 55 ignored — stays 70',
+    );
+
+    useWrapStore.getState().completeStep('fetching-transactions');
+    assert(
+        useWrapStore.getState().stepProgress['fetching-transactions'] === 100,
+        'completeStep sets 100',
+    );
+
+    // Stale progress after completion ignored
+    useWrapStore.getState().setStepProgress('fetching-transactions', 30);
+    assert(
+        useWrapStore.getState().stepProgress['fetching-transactions'] === 100,
+        'stale progress after complete ignored',
+    );
 }
 
 // ─── completeStep ───────────────────────────────────────────────────────────
 
 section('completeStep');
 {
-    useIndexingStore.getState().reset();
-    useIndexingStore.getState().startIndexing();
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
 
-    useIndexingStore.getState().completeStep('initializing');
-    let state = useIndexingStore.getState();
+    useWrapStore.getState().completeStep('initializing');
+    let state = useWrapStore.getState();
     assert(state.stepProgress.initializing === 100, 'completeStep: progress set to 100');
     assert(state.completedSteps === 1, 'completeStep: completedSteps is 1');
     assert(state.completedStepRecord.initializing === true, 'completeStep: record set to true');
 
     // Idempotent — completing same step again should not increment
-    useIndexingStore.getState().completeStep('initializing');
-    state = useIndexingStore.getState();
+    useWrapStore.getState().completeStep('initializing');
+    state = useWrapStore.getState();
     assert(state.completedSteps === 1, 'completeStep: idempotent — still 1');
 }
 
@@ -192,50 +233,50 @@ section('completeStep');
 
 section('Overall progress calculation');
 {
-    useIndexingStore.getState().reset();
-    useIndexingStore.getState().startIndexing();
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
 
     // Complete all steps
-    STEP_ORDER.forEach((step) => useIndexingStore.getState().completeStep(step));
-    const state = useIndexingStore.getState();
+    STEP_ORDER.forEach((step) => useWrapStore.getState().completeStep(step));
+    const state = useWrapStore.getState();
     assert(state.completedSteps === 7, 'all steps: completedSteps is 7');
     assert(state.overallProgress === 100, 'all steps: overallProgress is 100');
 }
 
-// ─── setError ───────────────────────────────────────────────────────────────
+// ─── setIndexingError ───────────────────────────────────────────────────────
 
-section('setError');
+section('setIndexingError');
 {
-    useIndexingStore.getState().reset();
-    useIndexingStore.getState().startIndexing();
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
 
-    useIndexingStore.getState().setError('fetching-transactions', 'Horizon 503', true);
-    const state = useIndexingStore.getState();
-    assert(state.error !== null, 'error is set');
-    assert(state.error!.step === 'fetching-transactions', 'error step matches');
-    assert(state.error!.message === 'Horizon 503', 'error message matches');
-    assert(state.error!.recoverable === true, 'error is recoverable');
-    assert(state.isLoading === false, 'setError stops loading');
+    useWrapStore.getState().setIndexingError('fetching-transactions', 'Horizon 503', true);
+    const state = useWrapStore.getState();
+    assert(state.indexingError !== null, 'indexingError is set');
+    assert(state.indexingError!.step === 'fetching-transactions', 'indexingError step matches');
+    assert(state.indexingError!.message === 'Horizon 503', 'indexingError message matches');
+    assert(state.indexingError!.recoverable === true, 'indexingError is recoverable');
+    assert(state.isLoading === false, 'setIndexingError stops loading');
 }
 
-// ─── clearError ─────────────────────────────────────────────────────────────
+// ─── clearIndexingError ─────────────────────────────────────────────────────
 
-section('clearError');
+section('clearIndexingError');
 {
-    useIndexingStore.getState().clearError();
-    assert(useIndexingStore.getState().error === null, 'error cleared');
+    useWrapStore.getState().clearIndexingError();
+    assert(useWrapStore.getState().indexingError === null, 'indexingError cleared');
 }
 
 // ─── cancelIndexing ─────────────────────────────────────────────────────────
 
 section('cancelIndexing');
 {
-    useIndexingStore.getState().reset();
-    useIndexingStore.getState().startIndexing();
-    useIndexingStore.getState().setCurrentStep('fetching-transactions');
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
+    useWrapStore.getState().setCurrentStep('fetching-transactions');
 
-    useIndexingStore.getState().cancelIndexing();
-    const state = useIndexingStore.getState();
+    useWrapStore.getState().cancelIndexing();
+    const state = useWrapStore.getState();
     assert(state.isCancelled === true, 'cancel: isCancelled true');
     assert(state.isLoading === false, 'cancel: isLoading false');
     assert(state.currentStep === null, 'cancel: currentStep null');
@@ -245,17 +286,17 @@ section('cancelIndexing');
 
 section('reset');
 {
-    useIndexingStore.getState().startIndexing();
-    useIndexingStore.getState().completeStep('initializing');
-    useIndexingStore.getState().setError('finalizing', 'oops');
+    useWrapStore.getState().startIndexing();
+    useWrapStore.getState().completeStep('initializing');
+    useWrapStore.getState().setIndexingError('finalizing', 'oops');
 
-    useIndexingStore.getState().reset();
-    const state = useIndexingStore.getState();
+    useWrapStore.getState().reset();
+    const state = useWrapStore.getState();
     assert(state.currentStep === null, 'reset: currentStep null');
     assert(state.completedSteps === 0, 'reset: completedSteps 0');
     assert(state.overallProgress === 0, 'reset: overallProgress 0');
     assert(state.isLoading === false, 'reset: isLoading false');
-    assert(state.error === null, 'reset: error null');
+    assert(state.indexingError === null, 'reset: indexingError null');
     assert(state.isCancelled === false, 'reset: isCancelled false');
 }
 
@@ -263,24 +304,24 @@ section('reset');
 
 section('Progress guard: does not update when not loading');
 {
-    useIndexingStore.getState().reset();
+    useWrapStore.getState().reset();
     // Do NOT call startIndexing — isLoading remains false
-    useIndexingStore.getState().setStepProgress('initializing', 100);
-    assert(useIndexingStore.getState().overallProgress === 0, 'progress stays 0 when not loading');
+    useWrapStore.getState().setStepProgress('initializing', 100);
+    assert(useWrapStore.getState().overallProgress === 0, 'progress stays 0 when not loading');
 }
 
 // ─── Step Completion Cap ────────────────────────────────────────────────────
 
 section('Step completion cap');
 {
-    useIndexingStore.getState().reset();
-    useIndexingStore.getState().startIndexing();
+    useWrapStore.getState().reset();
+    useWrapStore.getState().startIndexing();
 
     // Complete all 7 + try to exceed
-    STEP_ORDER.forEach((step) => useIndexingStore.getState().completeStep(step));
+    STEP_ORDER.forEach((step) => useWrapStore.getState().completeStep(step));
     // Re-completing should not push beyond 7
-    STEP_ORDER.forEach((step) => useIndexingStore.getState().completeStep(step));
-    assert(useIndexingStore.getState().completedSteps === 7, 'completedSteps capped at 7');
+    STEP_ORDER.forEach((step) => useWrapStore.getState().completeStep(step));
+    assert(useWrapStore.getState().completedSteps === 7, 'completedSteps capped at 7');
 }
 
 // ─── Report ─────────────────────────────────────────────────────────────────

@@ -1,0 +1,40 @@
+name: OpenAPI Lint
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  lint-openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate openapi.yaml against an OpenAPI linter
+        run: npx --yes @redocly/cli@2.49.0 lint openapi.yaml
+
+      - name: Fail when a route.ts exists with no matching OpenAPI path
+        run: |
+          # Every app/api route file must have a matching path in openapi.yaml.
+          # Derives paths from route files (e.g. app/api/notifications/data/[wallet]/route.ts
+          # -> /api/notifications/data/{wallet}) and greps the spec for them.
+          fail=0
+          for route in $(find app/api -name route.ts | sort); do
+            path="/$(echo "$route" | sed -E 's#^app/##; s#/route\.ts$##; s#\[([^]]+)\]#{\1}#g')"
+            if ! grep -q "^\s*${path}:" openapi.yaml; then
+              echo "❌ No OpenAPI path for ${path} (${route})"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "Add the missing paths to openapi.yaml (see docs(api) issue #390)."
+            exit 1
+          fi
+          echo "✅ All API routes are documented in openapi.yaml"

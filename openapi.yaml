@@ -1,0 +1,1033 @@
+openapi: "3.1.0"
+info:
+  title: Stellar Wrap API
+  version: "1.0.0"
+  description: |
+    API routes exposed by the Stellar Wrap Next.js application.
+
+    Public endpoints:
+    - **GET /api/wrapped** — returns aggregated on-chain statistics for a Stellar address.
+    - **GET /api/og** — returns a 1200 × 1200 PNG share card (served from Vercel Edge Runtime).
+
+    Notification endpoints (push + email subscriptions, GDPR data deletion):
+    - **POST /api/notifications/subscribe** — store a browser push subscription.
+    - **POST /api/notifications/subscribe-email** — start an email subscription (pending confirmation).
+    - **GET /api/notifications/confirm-email** — confirm a pending email subscription.
+    - **POST /api/notifications/unsubscribe** — unsubscribe by token or by wallet + channel.
+    - **POST /api/notifications/dispatch** — triggered by a Vercel cron; fans out due notifications.
+    - **GET /api/notifications/preferences/{wallet}** — read a subscription record.
+    - **PUT /api/notifications/preferences/{wallet}** — update a subscription record.
+    - **DELETE /api/notifications/data/{wallet}** — GDPR data deletion request.
+
+servers:
+  - url: https://stellar-wrap.vercel.app
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+
+security: []
+
+paths:
+  /api/wrapped:
+    get:
+      operationId: getWrapped
+      summary: Get aggregated wrap data for a Stellar account
+      description: |
+        Fetches and indexes on-chain transaction history for the given Stellar
+        address and returns aggregated statistics for the requested period.
+
+        **Caching**: Results are cached in IndexedDB for 60 minutes.
+        Subsequent requests within that window return `cached: true` and may
+        trigger a background re-index (`refreshingInBackground: true`).
+
+        **Rate limiting**: Horizon may respond with HTTP 429. The server
+        propagates this as a 429 response to the caller.
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          description: Stellar public key (56 characters, starting with "G").
+          schema:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
+            example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        - name: network
+          in: query
+          required: false
+          description: Stellar network to query. Defaults to `mainnet`.
+          schema:
+            type: string
+            enum: [mainnet, testnet]
+            default: mainnet
+        - name: period
+          in: query
+          required: false
+          description: Reporting period. Defaults to `monthly`.
+          schema:
+            type: string
+            enum: [weekly, monthly, yearly]
+            default: monthly
+      responses:
+        "200":
+          description: Successfully indexed account statistics.
+          headers:
+            Cache-Control:
+              description: No server-side cache; IndexedDB caching is handled client-side.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WrappedResponse"
+              example:
+                username: "alice.stellar"
+                address: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+                totalTransactions: 142
+                totalVolume: 58432.5
+                percentile: 87
+                persona: "The DeFi Patron"
+                personaDescription: "You move capital with purpose across Stellar's DEX."
+                dapps:
+                  - name: "Stellar DEX"
+                    transactions: 80
+                    color: "#6366f1"
+                    gradient: "linear-gradient(135deg,#6366f1,#8b5cf6)"
+                vibes:
+                  - type: "Power User"
+                    percentage: 72
+                    color: "#f59e0b"
+                    label: "Power User"
+                cached: false
+                cacheTimestamp: null
+                refreshingInBackground: false
+        "400":
+          description: Missing or invalid request parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingAccountId:
+                  value:
+                    error: "Missing accountId parameter"
+                invalidFormat:
+                  value:
+                    error: "Invalid account ID format"
+                invalidNetwork:
+                  value:
+                    error: "Invalid network"
+                invalidPeriod:
+                  value:
+                    error: "Invalid period"
+        "404":
+          description: Account not found on the specified network.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Account not found on this network"
+                details: "Make sure you selected the correct network (mainnet/testnet) where the account exists"
+        "429":
+          description: Horizon rate limit exceeded. Retry after a short delay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Rate limited. Please try again later."
+        "500":
+          description: Unexpected server or Horizon error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Failed to fetch wrapped data"
+                details: "Horizon server error"
+
+  /api/og:
+    get:
+      operationId: getOgImage
+      summary: Generate a 1200 × 1200 PNG share card
+      description: |
+        Runs on **Vercel Edge Runtime** and returns a binary PNG image
+        suitable for use as an Open Graph / social media share card.
+
+        **Cache**: `Cache-Control: public, s-maxage=86400, stale-while-revalidate=604800`
+        — the CDN caches the image for 24 hours and can serve stale content for
+        up to 7 days while revalidating in the background.
+
+        The image is also called by social media crawlers when the page URL is
+        shared on X, Facebook, WhatsApp, etc.
+      parameters:
+        - name: username
+          in: query
+          required: false
+          description: Stellar username or truncated address shown on the card.
+          schema:
+            type: string
+            default: StellarUser
+            example: "alice.stellar"
+        - name: transactions
+          in: query
+          required: false
+          description: Total transaction count (stringified integer).
+          schema:
+            type: string
+            default: "0"
+            example: "142"
+        - name: persona
+          in: query
+          required: false
+          description: Persona / archetype label displayed on the card.
+          schema:
+            type: string
+            default: "Network Pioneer"
+            example: "The DeFi Patron"
+        - name: topVibe
+          in: query
+          required: false
+          description: Top vibe label (e.g. "Steady", "Power User").
+          schema:
+            type: string
+            default: Steady
+            example: "Power User"
+        - name: vibePercentage
+          in: query
+          required: false
+          description: Percentage for the top vibe (0–100, stringified).
+          schema:
+            type: string
+            default: "0"
+            example: "72"
+        - name: archetypeImage
+          in: query
+          required: false
+          description: |
+            Path to the archetype image relative to the app's public directory.
+            Defaults to a slug derived from the `persona` parameter.
+          schema:
+            type: string
+            example: "/archetypes/defi-patron.png"
+      responses:
+        "200":
+          description: 1200 × 1200 PNG share card image.
+          headers:
+            Cache-Control:
+              description: CDN caching directive.
+              schema:
+                type: string
+                example: "public, s-maxage=86400, stale-while-revalidate=604800"
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "500":
+          description: Image generation failed.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to generate the image"
+
+  /api/notifications/subscribe:
+    post:
+      operationId: subscribePush
+      summary: Store a browser push subscription for a wallet
+      description: |
+        Persists a Web Push subscription for a Stellar wallet address together
+        with the wrap periods the subscriber wants to be notified about.
+
+        Requires a valid `PushSubscriptionJSON` object from the
+        browser's Push API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscribeRequest"
+            example:
+              walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+              subscription:
+                endpoint: "https://fcm.googleapis.com/fcm/send/abc123"
+                expirationTime: null
+                keys:
+                  p256dh: "BHcq...p256dh"
+                  auth: "Qxi...auth"
+              periods:
+                weekly: false
+                monthly: true
+                yearly: false
+      responses:
+        "200":
+          description: Push subscription stored successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+              example:
+                ok: true
+        "400":
+          description: Invalid wallet address or missing push subscription.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidWallet:
+                  value:
+                    error: "Invalid wallet address"
+                invalidSubscription:
+                  value:
+                    error: "Invalid push subscription"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/subscribe-email:
+    post:
+      operationId: subscribeEmail
+      summary: Start an email subscription (pending confirmation)
+      description: |
+        Validates an email address and wallet, writes a pending email
+        subscription to KV, and sends a confirmation email with a
+        confirmation link. The email is only active after the link is visited
+        (`GET /api/notifications/confirm-email`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailSubscribeRequest"
+            example:
+              walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+              email: "alice@example.com"
+              periods:
+                weekly: true
+                monthly: true
+                yearly: false
+      responses:
+        "200":
+          description: Confirmation email sent; subscription is pending.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  status:
+                    type: string
+                    enum: [pending]
+                    example: "pending"
+              example:
+                ok: true
+                status: "pending"
+        "400":
+          description: Invalid wallet address or invalid email address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidWallet:
+                  value:
+                    error: "Invalid wallet address"
+                invalidEmail:
+                  value:
+                    error: "Invalid email address"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/confirm-email:
+    get:
+      operationId: confirmEmail
+      summary: Confirm a pending email subscription
+      description: |
+        Activates a pending email subscription by matching the confirmation
+        token against the stored record for the wallet. On success (including
+        the already-active case) the caller is redirected to
+        `/notifications?confirmed=true`.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: Confirmation token emailed to the subscriber.
+          schema:
+            type: string
+            example: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
+        - name: wallet
+          in: query
+          required: true
+          description: Stellar public key the subscription belongs to.
+          schema:
+            type: string
+            example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+      responses:
+        "302":
+          description: Redirect to `/notifications?confirmed=true` on success.
+          headers:
+            Location:
+              description: Redirect target.
+              schema:
+                type: string
+                example: "/notifications?confirmed=true"
+        "400":
+          description: Missing token or wallet parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Missing token or wallet parameter"
+        "404":
+          description: No pending subscription or invalid/expired token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                noSubscription:
+                  value:
+                    error: "No pending email subscription found"
+                invalidToken:
+                  value:
+                    error: "Invalid or expired confirmation token"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/unsubscribe:
+    post:
+      operationId: unsubscribe
+      summary: Unsubscribe from notifications
+      description: |
+        Two modes, mutually exclusive:
+        - `{ "token": "..." }` — one-click unsubscribe using the token from the
+          footer of a notification email.
+        - `{ "walletAddress": "...", "channel": "push" | "email" }` — disable a
+          single channel from the preference page.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnsubscribeRequest"
+            examples:
+              byToken:
+                value:
+                  token: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
+              byChannel:
+                value:
+                  walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+                  channel: "email"
+      responses:
+        "200":
+          description: Successfully unsubscribed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+              example:
+                ok: true
+        "400":
+          description: Missing token or walletAddress+channel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Provide either token or walletAddress+channel"
+        "404":
+          description: Token not found or no subscription for the wallet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                tokenNotFound:
+                  value:
+                    error: "Token not found"
+                noSubscription:
+                  value:
+                    error: "No subscription found"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/dispatch:
+    post:
+      operationId: dispatchNotifications
+      summary: Fan out due notifications to all subscribers
+      description: |
+        Evaluates which wrap periods have just started and fans out push/email
+        notifications to every matching subscriber. Idempotent per
+        wallet/channel/period — a dispatch log entry prevents duplicate sends.
+
+        **Cron**: Driven hourly by a Vercel cron job
+        (`vercel.json` → `0 * * * *`).
+
+        **Authentication**: Requires `Authorization: Bearer $CRON_SECRET`.
+        If `CRON_SECRET` is not configured on the server, the check is skipped.
+      security:
+        - cronSecretAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                periods:
+                  type: array
+                  description: Override which periods to dispatch instead of deriving from the current time.
+                  items:
+                    $ref: "#/components/schemas/WrapPeriod"
+            example:
+              periods:
+                - monthly
+      responses:
+        "200":
+          description: Dispatch completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, dispatched, periods]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  dispatched:
+                    type: integer
+                    minimum: 0
+                    description: Number of notifications actually sent.
+                    example: 42
+                  periods:
+                    type: array
+                    description: Periods considered by this dispatch.
+                    items:
+                      $ref: "#/components/schemas/WrapPeriod"
+                  message:
+                    type: string
+                    description: Present when no periods were active.
+                    example: "No active periods"
+              examples:
+                withDispatch:
+                  value:
+                    ok: true
+                    dispatched: 42
+                    periods:
+                      - monthly
+                noActivePeriods:
+                  value:
+                    ok: true
+                    dispatched: 0
+                    periods: []
+                    message: "No active periods"
+        "401":
+          description: Missing or invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Unauthorized"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/data/{wallet}:
+    delete:
+      operationId: deleteNotificationData
+      summary: Request deletion of all data for a wallet (GDPR)
+      description: |
+        Immediately purges push/email PII for the wallet and clears its
+        dispatch logs. The record is flagged with a deletion timestamp; a
+        confirmation email is sent when an email address was on file
+        (non-fatal if sending fails). Dispatch logs are otherwise cleared
+        within 30 days per policy.
+      parameters:
+        - name: wallet
+          in: path
+          required: true
+          description: Stellar public key whose data should be deleted.
+          schema:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
+            example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+      responses:
+        "200":
+          description: Data deleted successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+              example:
+                ok: true
+        "400":
+          description: Invalid wallet address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Invalid wallet address"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/preferences/{wallet}:
+    get:
+      operationId: getNotificationPreferences
+      summary: Read a subscription record for a wallet
+      description: |
+        Returns the full `SubscriptionRecord` (push/email channels, period
+        preferences, consent flags) for the wallet, or a 404 when no record
+        exists.
+      parameters:
+        - name: wallet
+          in: path
+          required: true
+          description: Stellar public key to read.
+          schema:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
+            example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+      responses:
+        "200":
+          description: Subscription record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionRecord"
+              example:
+                walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+                email:
+                  address: "alice@example.com"
+                  status: "active"
+                  confirmationToken: ""
+                  unsubscribeToken: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
+                  periods:
+                    weekly: true
+                    monthly: true
+                    yearly: false
+                  createdAt: "2026-08-01T10:00:00.000Z"
+                consentGiven: true
+                consentTimestamp: "2026-08-01T10:00:00.000Z"
+        "400":
+          description: Invalid wallet address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Invalid wallet address"
+        "404":
+          description: No subscription found for the wallet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "No subscription found"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+    put:
+      operationId: updateNotificationPreferences
+      summary: Update a subscription record for a wallet
+      description: |
+        Merges only the allowed fields (`push`, `email`, `consentGiven`) into
+        the existing record. The `walletAddress` is never overwritten. Returns
+        the updated record, or a 404 when no record exists.
+      parameters:
+        - name: wallet
+          in: path
+          required: true
+          description: Stellar public key to update.
+          schema:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
+            example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Partial fields to merge into the existing record.
+              properties:
+                consentGiven:
+                  type: boolean
+                  example: true
+              example:
+                consentGiven: true
+      responses:
+        "200":
+          description: Updated subscription record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionRecord"
+        "400":
+          description: Invalid wallet address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Invalid wallet address"
+        "404":
+          description: No subscription found for the wallet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "No subscription found"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+components:
+  securitySchemes:
+    cronSecretAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Bearer token matching the `CRON_SECRET` environment variable. Set by the
+        Vercel cron job that calls `POST /api/notifications/dispatch`.
+
+  schemas:
+    WrapPeriod:
+      type: string
+      enum: [weekly, monthly, yearly]
+      example: monthly
+
+    PeriodPrefs:
+      type: object
+      required: [weekly, monthly, yearly]
+      properties:
+        weekly:
+          type: boolean
+          example: true
+        monthly:
+          type: boolean
+          example: true
+        yearly:
+          type: boolean
+          example: false
+
+    PushSubscription:
+      type: object
+      description: A Web Push subscription as produced by the browser Push API.
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          description: Push service endpoint URL.
+          example: "https://fcm.googleapis.com/fcm/send/abc123"
+        expirationTime:
+          type: [string, "null"]
+          format: date-time
+          description: Subscription expiration time, or null if it never expires.
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh:
+              type: string
+              description: Base64url-encoded ECDH P-256 public key.
+              example: "BHcq...p256dh"
+            auth:
+              type: string
+              description: Base64url-encoded authentication secret.
+              example: "Qxi...auth"
+
+    PushChannel:
+      type: object
+      required: [subscription, periods, createdAt]
+      properties:
+        subscription:
+          $ref: "#/components/schemas/PushSubscription"
+        periods:
+          $ref: "#/components/schemas/PeriodPrefs"
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO-8601 creation time.
+
+    EmailChannel:
+      type: object
+      required: [address, status, confirmationToken, unsubscribeToken, periods, createdAt]
+      properties:
+        address:
+          type: string
+          format: email
+          example: "alice@example.com"
+        status:
+          type: string
+          enum: [pending, active]
+          example: "active"
+        confirmationToken:
+          type: string
+          description: Set while pending; cleared on confirmation.
+          example: ""
+        unsubscribeToken:
+          type: string
+          description: Persistent token used by the unsubscribe link.
+          example: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
+        periods:
+          $ref: "#/components/schemas/PeriodPrefs"
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO-8601 creation time.
+
+    SubscriptionRecord:
+      type: object
+      required: [walletAddress, consentGiven, consentTimestamp]
+      properties:
+        walletAddress:
+          type: string
+          example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        push:
+          $ref: "#/components/schemas/PushChannel"
+        email:
+          $ref: "#/components/schemas/EmailChannel"
+        consentGiven:
+          type: boolean
+          example: true
+        consentTimestamp:
+          type: string
+          format: date-time
+          description: ISO-8601 consent time.
+        deletionRequested:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            ISO-8601 timestamp set when the user has requested data deletion.
+            Present only after a GDPR deletion request.
+
+    PushSubscribeRequest:
+      type: object
+      required: [walletAddress, subscription, periods]
+      properties:
+        walletAddress:
+          type: string
+          pattern: "^G[A-Z2-7]{55}$"
+          description: Stellar public key (56 characters, starting with "G").
+          example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        subscription:
+          $ref: "#/components/schemas/PushSubscription"
+        periods:
+          $ref: "#/components/schemas/PeriodPrefs"
+
+    EmailSubscribeRequest:
+      type: object
+      required: [walletAddress, email, periods]
+      properties:
+        walletAddress:
+          type: string
+          pattern: "^G[A-Z2-7]{55}$"
+          description: Stellar public key (56 characters, starting with "G").
+          example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        periods:
+          $ref: "#/components/schemas/PeriodPrefs"
+
+    UnsubscribeRequest:
+      type: object
+      description: One of `token` or `walletAddress` + `channel` (mutually exclusive).
+      properties:
+        token:
+          type: string
+          description: Unsubscribe token from a notification email.
+          example: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
+        walletAddress:
+          type: string
+          pattern: "^G[A-Z2-7]{55}$"
+          description: Stellar public key.
+          example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        channel:
+          type: string
+          enum: [push, email]
+          description: Channel to disable on the preference page.
+          example: "email"
+
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+    WrappedDapp:
+      type: object
+      required: [name, transactions, color, gradient]
+      properties:
+        name:
+          type: string
+          example: "Stellar DEX"
+        transactions:
+          type: integer
+          example: 80
+        color:
+          type: string
+          example: "#6366f1"
+        gradient:
+          type: string
+          example: "linear-gradient(135deg,#6366f1,#8b5cf6)"
+
+    WrappedVibe:
+      type: object
+      required: [type, percentage, color, label]
+      properties:
+        type:
+          type: string
+          example: "Power User"
+        percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 72
+        color:
+          type: string
+          example: "#f59e0b"
+        label:
+          type: string
+          example: "Power User"
+
+    WrappedResponse:
+      type: object
+      required:
+        - username
+        - address
+        - totalTransactions
+        - totalVolume
+        - percentile
+        - persona
+        - personaDescription
+        - dapps
+        - vibes
+        - cached
+        - cacheTimestamp
+        - refreshingInBackground
+      properties:
+        username:
+          type: string
+          example: "alice.stellar"
+        address:
+          type: string
+          example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        totalTransactions:
+          type: integer
+          example: 142
+        totalVolume:
+          type: number
+          example: 58432.5
+        percentile:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 87
+        persona:
+          type: string
+          example: "The DeFi Patron"
+        personaDescription:
+          type: string
+          example: "You move capital with purpose across Stellar's DEX."
+        dapps:
+          type: array
+          items:
+            $ref: "#/components/schemas/WrappedDapp"
+        vibes:
+          type: array
+          items:
+            $ref: "#/components/schemas/WrappedVibe"
+        cached:
+          type: boolean
+          description: True when served from the 60-minute IndexedDB cache.
+        cacheTimestamp:
+          type: [string, "null"]
+          format: date-time
+          description: ISO-8601 creation time of the cache entry, or null.
+        refreshingInBackground:
+          type: boolean
+          description: True when a background re-index has been triggered.
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message safe for clients.
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          enum:
+            - INVALID_WALLET
+            - INVALID_PUSH_SUBSCRIPTION
+            - INVALID_EMAIL
+            - INVALID_REQUEST
+            - NOT_FOUND
+            - INVALID_CONFIRMATION_TOKEN
+            - INVALID_UNSUBSCRIBE_TOKEN
+            - UNAUTHORIZED
+            - INTERNAL_ERROR
+        requestId:
+          type: string
+          format: uuid
+          description: Correlation id included for internal failures.

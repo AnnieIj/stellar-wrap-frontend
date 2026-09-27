@@ -5,13 +5,21 @@ import { Box, Database } from 'lucide-react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ColorToggle } from './ColorToggle';
+import { DarkLightToggle } from './DarkLightToggle';
 import { NetworkToggle } from './NetworkToggle';
+import { CommunityWrapsCarousel } from './CommunityWrapsCarousel';
+import ParticleField from './ParticleField';
+import { LiveWrapCounter } from './LiveWrapCounter';
 import { useWrapStore, WrapPeriod } from '../store/wrapStore';
+import { useReducedMotion, reducedMotionTransition } from '../hooks/useReducedMotion';
 
 export function LandingPage() {
   const router = useRouter();
-  const { period, setPeriod, reset } = useWrapStore();
+  const prefersReducedMotion = useReducedMotion();
+  const { period, setPeriod, reset, network } = useWrapStore();
   const [selectedPeriod, setSelectedPeriod] = useState<WrapPeriod>(period);
+  
+  const isMainnet = network === 'mainnet';
   
   const handleStart = () => {
     // Reset any existing wrap data when starting a new session,
@@ -22,10 +30,12 @@ export function LandingPage() {
   };
 
   return (
-    <div className="relative w-full min-h-screen h-screen overflow-hidden bg-theme-background">
+    <div className="relative w-full min-h-screen overflow-x-hidden overflow-y-auto bg-theme-background">
+      {/* Particle field background */}
+      <ParticleField />
+
       {/* Deep space gradient */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/20" />
-      
       {/* Hexagonal grid pattern */}
       <div className="absolute inset-0 opacity-20">
         <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
@@ -44,61 +54,75 @@ export function LandingPage() {
         style={{
           backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(var(--color-theme-primary-rgb), 0.03) 2px, rgba(var(--color-theme-primary-rgb), 0.03) 4px)',
         }}
-        animate={{
-          backgroundPosition: ['0px 0px', '0px 4px'],
-        }}
-        transition={{
+        animate={
+          prefersReducedMotion
+            ? undefined
+            : { backgroundPosition: ['0px 0px', '0px 4px'] }
+        }
+        transition={reducedMotionTransition(prefersReducedMotion, {
           duration: 0.1,
           repeat: Infinity,
           ease: "linear"
-        }}
+        })}
       />
 
       {/* Multiple layered glows for depth */}
       <motion.div
         className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[800px] rounded-full blur-[200px]"
         style={{ backgroundColor: 'rgba(var(--color-theme-primary-rgb), 0.1)' }}
-        animate={{
-          scale: [1, 1.1, 1],
-          opacity: [0.1, 0.2, 0.1],
-        }}
-        transition={{
+        animate={
+          prefersReducedMotion
+            ? { opacity: 0.15, scale: 1 }
+            : {
+                scale: [1, 1.1, 1],
+                opacity: [0.1, 0.2, 0.1],
+              }
+        }
+        transition={reducedMotionTransition(prefersReducedMotion, {
           duration: 8,
           repeat: Infinity,
           ease: "easeInOut"
-        }}
+        })}
       />
 
       <motion.div
         className="absolute bottom-0 left-1/4 w-[800px] h-[600px] rounded-full blur-[180px]"
         style={{ backgroundColor: 'rgba(var(--color-theme-primary-rgb), 0.08)' }}
-        animate={{
-          scale: [1, 1.2, 1],
-          opacity: [0.1, 0.15, 0.1],
-        }}
-        transition={{
+        animate={
+          prefersReducedMotion
+            ? { opacity: 0.1, scale: 1 }
+            : {
+                scale: [1, 1.2, 1],
+                opacity: [0.1, 0.15, 0.1],
+              }
+        }
+        transition={reducedMotionTransition(prefersReducedMotion, {
           duration: 10,
           repeat: Infinity,
           ease: "easeInOut"
-        }}
+        })}
       />
 
       <motion.div
         className="absolute top-1/3 right-1/4 w-[600px] h-[600px] rounded-full blur-[160px]"
         style={{ backgroundColor: 'rgba(var(--color-theme-primary-rgb), 0.06)' }}
-        animate={{
-          scale: [1, 1.15, 1],
-          opacity: [0.08, 0.12, 0.08],
-        }}
-        transition={{
+        animate={
+          prefersReducedMotion
+            ? { opacity: 0.08, scale: 1 }
+            : {
+                scale: [1, 1.15, 1],
+                opacity: [0.08, 0.12, 0.08],
+              }
+        }
+        transition={reducedMotionTransition(prefersReducedMotion, {
           duration: 12,
           repeat: Infinity,
           ease: "easeInOut"
-        }}
+        })}
       />
 
       {/* Floating blockchain nodes (geometric shapes) */}
-      {[...Array(8)].map((_, i) => (
+      {!prefersReducedMotion && [...Array(8)].map((_, i) => (
         <motion.div
           key={i}
           className="absolute hidden md:block"
@@ -129,6 +153,7 @@ export function LandingPage() {
       ))}
 
       {/* Blockchain connection lines */}
+      {!prefersReducedMotion && (
       <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20 hidden md:block">
         {[...Array(6)].map((_, i) => {
           const x1 = 20 + i * 15;
@@ -159,8 +184,10 @@ export function LandingPage() {
           );
         })}
       </svg>
+      )}
 
       {/* Animated block chain visualization */}
+      {!prefersReducedMotion && (
       <div className="absolute left-4 md:left-12 top-1/2 -translate-y-1/2 hidden sm:block">
         {[...Array(5)].map((_, i) => (
           <motion.div
@@ -202,8 +229,10 @@ export function LandingPage() {
           </motion.div>
         ))}
       </div>
+      )}
 
       {/* Animated transaction flow on right side */}
+      {!prefersReducedMotion && (
       <div className="absolute right-4 md:right-12 top-1/4 hidden sm:block">
         {[...Array(8)].map((_, i) => (
           <motion.div
@@ -232,15 +261,16 @@ export function LandingPage() {
           </motion.div>
         ))}
       </div>
+      )}
 
-      {/* Main content */}
-      <div className="relative z-10 h-full flex flex-col items-center justify-center px-8">
+      {/* Main content — hero */}
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 sm:px-8 w-full max-w-full">
         
         {/* Top HUD bar */}
         <motion.div
-          initial={{ y: -50, opacity: 0 }}
+          initial={prefersReducedMotion ? false : { y: -50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.2 }}
+          transition={reducedMotionTransition(prefersReducedMotion, { delay: 0.2 })}
           className="absolute top-4 md:top-8 left-0 right-0 flex items-center justify-center gap-3 md:gap-8"
         >
           <div className="flex items-center gap-3 md:gap-8">
@@ -248,18 +278,22 @@ export function LandingPage() {
               <motion.div
                 className="w-2 h-2 md:w-3 md:h-3 rounded-full"
                 style={{ backgroundColor: 'var(--color-theme-primary)' }}
-                animate={{
-                  opacity: [0.5, 1, 0.5],
-                  boxShadow: [
-                    `0 0 10px rgba(var(--color-theme-primary-rgb), 0.5)`,
-                    `0 0 20px rgba(var(--color-theme-primary-rgb), 1)`,
-                    `0 0 10px rgba(var(--color-theme-primary-rgb), 0.5)`,
-                  ],
-                }}
-                transition={{
+                animate={
+                  prefersReducedMotion
+                    ? { opacity: 1 }
+                    : {
+                        opacity: [0.5, 1, 0.5],
+                        boxShadow: [
+                          `0 0 10px rgba(var(--color-theme-primary-rgb), 0.5)`,
+                          `0 0 20px rgba(var(--color-theme-primary-rgb), 1)`,
+                          `0 0 10px rgba(var(--color-theme-primary-rgb), 0.5)`,
+                        ],
+                      }
+                }
+                transition={reducedMotionTransition(prefersReducedMotion, {
                   duration: 2,
                   repeat: Infinity,
-                }}
+                })}
               />
               <span className="text-xs md:text-sm font-black tracking-[0.2em] md:tracking-[0.3em] text-white">LIVE</span>
             </div>
@@ -268,8 +302,35 @@ export function LandingPage() {
           </div>
         </motion.div>
 
+        {/* Testnet Banner */}
+        {!isMainnet && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="absolute top-20 md:top-28 left-1/2 -translate-x-1/2 z-50"
+          >
+            <div className="backdrop-blur-xl px-4 py-2 md:px-6 md:py-3 rounded-xl border border-orange-500/30"
+              style={{ backgroundColor: 'rgba(255, 165, 0, 0.1)' }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs md:text-sm font-black text-orange-400">
+                  ⚠️ YOU'RE VIEWING TESTNET DATA
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Color Toggle - Fixed Position */}
-        <ColorToggle />
+        <motion.div
+          initial={{ opacity: 0, x: -50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.3 }}
+          className="fixed top-4 left-4 md:top-8 md:left-24 z-50"
+        >
+          <ColorToggle />
+        </motion.div>
 
         {/* Network Toggle - Fixed Position */}
         <NetworkToggle />
@@ -364,16 +425,16 @@ export function LandingPage() {
                 borderWidth: '1px',
               }}
             >
-              <h3 
-                className="text-3xl sm:text-4xl md:text-5xl font-black"
-                style={{
-                  background: `linear-gradient(to right, #ffffff, var(--color-theme-primary))`,
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
-              >
-                STELLAR
-              </h3>
+              <h2
+                 className="text-3xl sm:text-4xl md:text-5xl font-black"
+                 style={{
+                   background: `linear-gradient(to right, #ffffff, var(--color-theme-primary))`,
+                   WebkitBackgroundClip: 'text',
+                   WebkitTextFillColor: 'transparent',
+                 }}
+               >
+                 STELLAR
+               </h2>
             </div>
           </div>
         </motion.div>
@@ -393,6 +454,9 @@ export function LandingPage() {
           </p>
         </motion.div>
 
+        {/* Live Wrap Counter */}
+        <LiveWrapCounter />
+
         {/* Period selection */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -400,16 +464,26 @@ export function LandingPage() {
           transition={{ delay: 1.3 }}
           className="mb-6 md:mb-10"
         >
-          <div className="flex items-center gap-1 backdrop-blur-xl rounded-xl md:rounded-2xl p-1 md:p-2 border border-white/10"
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
-          >
+          <nav aria-label="Timeframe">
+            <div className="flex items-center gap-1 backdrop-blur-xl rounded-xl md:rounded-2xl p-1 md:p-2 border border-white/10"
+              style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            >
             {(['weekly', 'monthly', 'yearly'] as const).map((periodOption) => (
               <motion.button
                 key={periodOption}
                 onClick={() => setSelectedPeriod(periodOption)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedPeriod(periodOption);
+                  }
+                }}
                 className="relative px-4 py-2 sm:px-6 sm:py-3 md:px-8 md:py-4 rounded-lg md:rounded-xl font-black tracking-tight text-sm sm:text-base md:text-lg"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.98 }}
+                role="radio"
+                aria-checked={selectedPeriod === periodOption}
+                aria-label={`${periodOption} period`}
               >
                 {selectedPeriod === periodOption && (
                   <motion.div
@@ -427,6 +501,16 @@ export function LandingPage() {
               </motion.button>
             ))}
           </div>
+        </nav>
+          {selectedPeriod === 'yearly' && (
+            <motion.p
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-2 text-center text-xs sm:text-sm font-bold tracking-[0.2em] text-white/50 uppercase"
+            >
+              2026 in review
+            </motion.p>
+          )}
         </motion.div>
 
         {/* CTA Button */}
@@ -434,16 +518,23 @@ export function LandingPage() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.5 }}
+          className="w-full max-w-[min(calc(100%-1rem),22rem)] sm:max-w-md px-2 z-20"
         >
           <motion.button
             onClick={handleStart}
-            className="relative group"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleStart();
+              }
+            }}
+            className="relative group w-full"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.98 }}
           >
             {/* Button glow effect */}
             <motion.div
-              className="absolute -inset-2 md:-inset-4 rounded-xl md:rounded-2xl blur-xl md:blur-2xl"
+              className="absolute -inset-1 sm:-inset-2 md:-inset-4 rounded-xl md:rounded-2xl blur-lg sm:blur-xl md:blur-2xl"
               style={{ backgroundColor: 'rgba(var(--color-theme-primary-rgb), 0.4)' }}
               animate={{
                 opacity: [0.5, 0.8, 0.5],
@@ -470,18 +561,21 @@ export function LandingPage() {
                 }}
               />
               
-              <div className="relative px-8 py-4 sm:px-12 sm:py-6 md:px-20 md:py-8 rounded-xl md:rounded-2xl bg-theme-background"
+              <div className="relative px-4 py-3 min-h-[44px] sm:px-8 sm:py-5 md:px-12 md:py-6 rounded-xl md:rounded-2xl bg-theme-background"
               >
-                <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
-                  <div className="flex flex-col items-start">
-                    <span className="text-[10px] sm:text-xs font-black tracking-[0.15em] sm:tracking-[0.2em] mb-1 text-white/50">INITIALIZE</span>
-                    <span className="text-xl sm:text-3xl md:text-4xl font-black tracking-tight text-white">START WRAP</span>
+                <div className="flex items-center justify-between gap-2 sm:gap-4 md:gap-6">
+                  <div className="flex flex-col items-start min-w-0">
+                    <span className="text-[10px] sm:text-xs font-black tracking-[0.12em] sm:tracking-[0.2em] mb-0.5 sm:mb-1 text-white/50">INITIALIZE</span>
+                    <span className="text-lg sm:text-2xl md:text-4xl font-black tracking-tight text-white whitespace-nowrap">
+                      START WRAP ({isMainnet ? 'MAINNET' : 'TESTNET'})
+                    </span>
                   </div>
                   <motion.div
                     animate={{ x: [0, 5, 0] }}
                     transition={{ duration: 1.5, repeat: Infinity }}
+                    className="shrink-0"
                   >
-                    <svg className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10" viewBox="0 0 40 40" fill="none">
+                    <svg className="w-5 h-5 sm:w-7 sm:h-7 md:w-10 md:h-10" viewBox="0 0 40 40" fill="none">
                       <path d="M15 10L25 20L15 30" stroke="var(--color-theme-primary)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </motion.div>
@@ -491,6 +585,9 @@ export function LandingPage() {
           </motion.button>
         </motion.div>
       </div>
+
+      {/* Community wraps carousel */}
+      <CommunityWrapsCarousel />
 
       {/* Corner brackets (HUD elements) */ }
       <motion.div
