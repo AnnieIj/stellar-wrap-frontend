@@ -2,8 +2,10 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, RotateCcw, X, TrendingUp, Coins, FileText, Zap } from "lucide-react";
-import { useIndexingStore } from "@/app/store/indexingStore";
+import { useEffect, useState } from "react";
+import { useWrapStore } from "@/app/store/wrapStore";
 import { INDEXING_STEPS, STEP_ORDER, IndexingStep } from "@/app/types/indexing";
+import { StellarFunFacts } from "./StellarFunFacts";
 
 interface IndexingSkeletonProps {
   onRetry?: () => void;
@@ -24,11 +26,38 @@ export function IndexingSkeleton({
     overallProgress,
     completedSteps,
     totalSteps,
-    error,
+    indexingError,
     estimatedTimeRemaining,
     isLoading,
     metrics,
-  } = useIndexingStore();
+  } = useWrapStore();
+
+  // Cancel affordance: hidden for the first 3s of indexing (avoids flashing
+  // a cancel option for fast/cached loads), then a two-step confirm before
+  // actually calling onCancel.
+  const [showCancel, setShowCancel] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setShowCancel(true), 3000);
+    // Reset in the cleanup (runs when isLoading flips false, or on
+    // unmount) rather than synchronously in the effect body — avoids
+    // the cascading-render risk of setState directly in an effect.
+    return () => {
+      clearTimeout(timer);
+      setShowCancel(false);
+      setConfirmCancel(false);
+    };
+  }, [isLoading]);
+
+  const handleCancelClick = () => setConfirmCancel(true);
+  const handleConfirmCancel = () => {
+    setConfirmCancel(false);
+    onCancel?.();
+  };
 
   const formatTime = (ms: number): string => {
     const seconds = Math.ceil(ms / 1000);
@@ -100,7 +129,7 @@ export function IndexingSkeleton({
 
   const stepViz = getStepVisualization(currentStep);
 
-  if (!isLoading && !error) {
+  if (!isLoading && !indexingError) {
     return null;
   }
 
@@ -114,6 +143,11 @@ export function IndexingSkeleton({
     >
       {/* Main Progress Container with Neon/Cyberpunk aesthetic */}
       <div className="relative rounded-2xl border border-white/10 bg-linear-to-b from-white/5 to-transparent backdrop-blur-xl p-6 md:p-8 space-y-6 shadow-2xl">
+        {/* Screen Reader Progress Announcer */}
+        <div className="sr-only" aria-live="polite" aria-atomic="true">
+          {!indexingError && (currentStep ? `Step ${completedSteps + 1} of ${totalSteps}: ${INDEXING_STEPS[currentStep].label}. ${Math.floor(overallProgress / 20) * 20}% complete.` : "Preparing your data...")}
+        </div>
+
         {/* Neon glow effect */}
         <div
           className="absolute -inset-0.5 rounded-2xl opacity-20 blur-xl"
@@ -125,11 +159,11 @@ export function IndexingSkeleton({
         {/* Header Section */}
         <div className="relative space-y-2">
           <h2 className="text-2xl md:text-3xl font-black text-white">
-            {error ? "Indexing Error" : "Scanning the Blockchain"}
+            {indexingError ? "Indexing Error" : "Scanning the Blockchain"}
           </h2>
           <p className="text-neutral-400 text-sm md:text-base">
-            {error
-              ? error.message
+            {indexingError
+              ? indexingError.message
               : currentStep
                 ? INDEXING_STEPS[currentStep].description
                 : "Preparing your data..."}
@@ -138,7 +172,7 @@ export function IndexingSkeleton({
 
         {/* Step-Specific Real-Time Visualization */}
         <AnimatePresence mode="wait">
-          {stepViz && !error && (
+          {stepViz && !indexingError && (
             <motion.div
               key={currentStep}
               initial={{ opacity: 0, scale: 0.9 }}
@@ -192,6 +226,7 @@ export function IndexingSkeleton({
                     <stepViz.icon
                       className="w-8 h-8"
                       style={{ color: stepViz.color }}
+                      aria-hidden="true"
                     />
                   </motion.div>
 
@@ -247,15 +282,12 @@ export function IndexingSkeleton({
             aria-valuenow={currentStep ? stepProgress[currentStep] : 0}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-label={`${currentStep ? INDEXING_STEPS[currentStep].label : "Initializing"} progress`}
           >
-            <motion.div
-              className="h-full rounded-full"
-              initial={{ width: "0%" }}
-              animate={{
-                width: `${currentStep ? stepProgress[currentStep] : 0}%`,
-              }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+            <div
+              className="h-full rounded-full transition-[width] duration-300 ease-out"
               style={{
+                width: `${currentStep ? stepProgress[currentStep] : 0}%`,
                 backgroundColor: stepViz?.color || "var(--color-theme-primary)",
                 boxShadow: `0 0 10px ${stepViz?.color || "var(--color-theme-primary)"}`,
               }}
@@ -283,13 +315,12 @@ export function IndexingSkeleton({
             aria-valuenow={overallProgress}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-label="Overall indexing progress"
           >
-            <motion.div
-              className="h-full"
-              initial={{ width: "0%" }}
-              animate={{ width: `${overallProgress}%` }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+            <div
+              className="h-full transition-[width] duration-300 ease-out"
               style={{
+                width: `${overallProgress}%`,
                 background: `linear-gradient(90deg, #00D4FF, #6BCF7F, #FFD93D)`,
                 boxShadow: "0 0 15px rgba(0, 212, 255, 0.5)",
               }}
@@ -349,8 +380,11 @@ export function IndexingSkeleton({
           </div>
         </div>
 
+        {/* Stellar fun facts */}
+        <StellarFunFacts isLoading={isLoading && !indexingError} />
+
         {/* Time Estimate */}
-        {estimatedTimeRemaining && !error && (
+        {estimatedTimeRemaining && !indexingError && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -363,28 +397,71 @@ export function IndexingSkeleton({
           </motion.div>
         )}
 
+        {/* Cancel — visible after 3s while indexing */}
+        {showCancel && !indexingError && isLoading && (
+          <div className="relative space-y-3 pt-2">
+            {!confirmCancel ? (
+              <motion.button
+                onClick={handleCancelClick}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/20 bg-white/5 hover:bg-white/10 text-sm font-bold text-white/80 transition-colors"
+              >
+                <X className="w-4 h-4" />
+                Cancel indexing
+              </motion.button>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-3"
+              >
+                <p className="text-sm text-amber-100 font-medium text-center">
+                  Are you sure? Indexing progress will be lost.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setConfirmCancel(false)}
+                    className="flex-1 px-4 py-2 rounded-lg border border-white/20 text-sm font-medium text-white/70 hover:bg-white/5"
+                  >
+                    Keep going
+                  </button>
+                  <button
+                    onClick={handleConfirmCancel}
+                    className="flex-1 px-4 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-sm font-bold text-red-200 hover:bg-red-500/30"
+                  >
+                    Yes, cancel
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
         {/* Error State */}
         <AnimatePresence>
-          {error && (
+          {indexingError && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-3"
+              role="alert"
+              aria-live="assertive"
             >
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-semibold text-red-300">
-                    Error in {INDEXING_STEPS[error.step].label}
+                    Error in {INDEXING_STEPS[indexingError.step].label}
                   </p>
-                  <p className="text-sm text-red-200/80">{error.message}</p>
+                  <p className="text-sm text-red-200/80">{indexingError.message}</p>
                 </div>
               </div>
 
               {/* Error Actions */}
               <div className="flex gap-3 pt-2">
-                {error.recoverable && onRetry && (
+                {indexingError.recoverable && onRetry && (
                   <motion.button
                     onClick={onRetry}
                     whileHover={{ scale: 1.05 }}

@@ -3,6 +3,7 @@ import { IndexerEventEmitter } from "@/app/utils/indexerEventEmitter";
 import { STEP_ORDER, type IndexingStep } from "@/app/types/indexing";
 import type { IndexerResult, WrapPeriod } from "@/app/utils/indexer";
 import { indexerErrorLogger } from "@/app/utils/indexerErrorLogger";
+import { useRateLimitStore } from "@/src/store/rateLimitStore";
 import {
   backoffDelay,
   classifyError,
@@ -174,6 +175,8 @@ export class IndexerRecoveryService {
       this.state.totalRetries,
     );
 
+    useRateLimitStore.getState().reset();
+
     return (this.partialResults["finalizing"] as IndexerResult) ?? null;
   }
 
@@ -215,6 +218,7 @@ export class IndexerRecoveryService {
       return this.continueFrom(STEP_ORDER[nextIdx], opts);
     }
 
+    useRateLimitStore.getState().reset();
     this.state.pendingAction = null;
     this.emit();
     return (this.partialResults["finalizing"] as IndexerResult) ?? null;
@@ -268,6 +272,8 @@ export class IndexerRecoveryService {
       this.state.isPartial,
       this.state.totalRetries,
     );
+
+    useRateLimitStore.getState().reset();
 
     return (this.partialResults["finalizing"] as IndexerResult) ?? null;
   }

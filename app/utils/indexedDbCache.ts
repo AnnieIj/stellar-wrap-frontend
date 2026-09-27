@@ -6,6 +6,9 @@
 
 import type { CacheEntry } from "./indexer";
 import { CACHE_VERSION } from "./indexer";
+import { logger } from "./logger";
+
+const log = logger.child("IndexedDbCache");
 
 const DB_NAME = "stellar-wrap-cache";
 const STORE_NAME = "indexedData";
@@ -72,7 +75,7 @@ export async function getCacheEntry(key: string): Promise<CacheEntry | null> {
       request.onerror = () => reject(request.error);
     });
   } catch (error) {
-    console.warn("[IndexedDB cache] getCacheEntry failed:", error);
+    log.warn("getCacheEntry failed:", error);
     return null;
   }
 }
@@ -102,7 +105,7 @@ export async function setCacheEntry(
 
     await evictIfOverLimit(db);
   } catch (error) {
-    console.warn("[IndexedDB cache] setCacheEntry failed:", error);
+    log.warn("setCacheEntry failed:", error);
     try {
       closeCacheDB();
     } catch {
@@ -125,7 +128,7 @@ export async function invalidateCache(key: string): Promise<void> {
       request.onerror = () => reject(request.error);
     });
   } catch (error) {
-    console.warn("[IndexedDB cache] invalidateCache failed:", error);
+    log.warn("invalidateCache failed:", error);
   }
 }
 
@@ -143,7 +146,7 @@ export async function clearCache(): Promise<void> {
       request.onerror = () => reject(request.error);
     });
   } catch (error) {
-    console.warn("[IndexedDB cache] clearCache failed:", error);
+    log.warn("clearCache failed:", error);
   } finally {
     closeCacheDB();
   }
@@ -155,6 +158,45 @@ export async function clearCache(): Promise<void> {
 export async function getCacheTimestamp(key: string): Promise<number | null> {
   const entry = await getCacheEntry(key);
   return entry ? entry.timestamp : null;
+}
+
+/**
+ * Get all cache rows. Used for offline recovery where the app needs the most
+ * recent viewed wrap even if the current route has no wallet context.
+ */
+export async function getAllCacheEntries(): Promise<StoredCacheRecord[]> {
+  try {
+    const db = await openCacheDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const rows = (request.result ?? []) as StoredCacheRecord[];
+        resolve(
+          rows.filter((row) => {
+            const entry = row.data;
+            return entry?.version === undefined || entry.version === CACHE_VERSION;
+          }),
+        );
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (error) {
+    log.warn("getAllCacheEntries failed:", error);
+    return [];
+  }
+}
+
+/**
+ * Return the newest cached wrap result, regardless of TTL.
+ */
+export async function getMostRecentCacheEntry(): Promise<StoredCacheRecord | null> {
+  const rows = await getAllCacheEntries();
+  if (!rows.length) return null;
+  return rows.reduce((latest, row) =>
+    row.timestamp > latest.timestamp ? row : latest,
+  );
 }
 
 async function evictIfOverLimit(db: IDBDatabase): Promise<void> {

@@ -26,11 +26,10 @@ export function MuteToggle({ className }: MuteToggleProps) {
       aria-pressed={isMuted}
     >
       {isMuted ? (
-        <VolumeX className="w-5 h-5 text-white/70" />
+        <VolumeX className="w-5 h-5 text-white/70" aria-hidden="true" />
       ) : (
-        <Volume2 className="w-5 h-5 text-[#1DB954]" />
+        <Volume2 className="w-5 h-5 text-[#1DB954]" aria-hidden="true" />
       )}
     </motion.button>
   );
 }
-

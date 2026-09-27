@@ -1,18 +1,26 @@
-import type { NextConfig } from "next";
+import { NextConfig } from 'next';
+import createNextIntlPlugin from 'next-intl/plugin';
+import withBundleAnalyzer from '@next/bundle-analyzer';
 
-const nextConfig: NextConfig = {
-  images: {
-    remotePatterns: [
+const withNextIntl = createNextIntlPlugin(
+  './i18n/request.ts'
+);
+
+export const nextConfig: NextConfig = {
+  async headers() {
+    return [
       {
-        protocol: "https",
-        hostname: "assets.coingecko.com",
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Permissions-Policy',
+            value:
+              'camera=(), microphone=(), geolocation=(), usb=(), serial=(), payment=(), accelerometer=(), gyroscope=(), magnetometer=()',
+          },
+        ],
       },
-      {
-        protocol: "https",
-        hostname: "*.stellar.expert",
-      },
-    ],
+    ];
   },
 };
 
-export default nextConfig;
+export default withNextIntl(withBundleAnalyzer(nextConfig));

@@ -1,0 +1,77 @@
+{
+  "LandingPage": {
+    "title": "Bienvenue sur Stellar Wrap",
+    "subtitle": "Votre récapitulatif de l’année sur le réseau Stellar"
+  },
+  "Navbar": {
+    "disconnect": "Se déconnecter"
+  },
+  "Landing": {
+    "tagline": "Votre histoire blockchain racontée comme jamais auparavant."
+  },
+  "SharePage": {
+    "title": "Stellar Wrapped 2026",
+    "shareText": "Découvrez mon Stellar Wrapped 2026 ! {transactions} transactions, personnalité {persona}, {vibePercentage}% {topVibe} ! 🎉 #StellarWrapped",
+    "viewHistory": "Voir l'historique complet sur Stellar.expert",
+    "linkCopied": "Lien copié dans le presse-papiers",
+    "copyLink": "Copier le lien dans le presse-papiers",
+    "copied": "Copié !",
+    "closeMenu": "Fermer le menu de partage",
+    "openMenu": "Ouvrir le menu de partage"
+  },
+  "ShareCard": {
+    "mintedSuccessfully": "Création réussie !",
+    "viewTransaction": "Voir votre transaction dans Stellar Explorer",
+    "view": "Voir",
+    "mintingFailed": "Échec de la création",
+    "starting": "Démarrage...",
+    "gifDownloaded": "GIF téléchargé",
+    "gifDescription": "Optimisé pour Twitter, WhatsApp et Telegram.",
+    "videoDownloaded": "Vidéo téléchargée",
+    "videoDescription": "MP4/WebM — idéal pour Discord et les intégrations enrichies.",
+    "staticPng": "Retour à un PNG statique",
+    "animationExportFailed": "Échec de l'export de l'animation",
+    "exportFailed": "Échec de l'export",
+    "mintingOffline": "La création est indisponible hors connexion",
+    "connectWalletFirst": "Veuillez d’abord connecter votre portefeuille",
+    "connectWallet": "Connecter le portefeuille",
+    "transactionSimulationSuccessful": "Simulation de transaction réussie",
+    "estimatedFee": "Frais estimés : {fee} XLM",
+    "buildingTransaction": "Construction de la transaction...",
+    "simulatingTransaction": "Simulation de la transaction...",
+    "awaitingSignature": "En attente de la signature du portefeuille...",
+    "confirmingAttempt": "Confirmation… tentative {attempt} / 60",
+    "submittingTransaction": "Envoi de la transaction...",
+    "confirmingTransaction": "Confirmation de la transaction...",
+    "minted": "Créé !",
+    "retryMint": "Réessayer",
+    "mintWrap": "Créer mon Wrap",
+    "mintUnavailableOffline": "Indisponible hors connexion",
+    "stellarWrapped": "STELLAR WRAPPED 2026",
+    "totalTransactions": "Transactions totales",
+    "persona": "Personnalité",
+    "topVibe": "Vibe principale",
+    "shareYourWrap": "PARTAGER / VOTRE WRAP",
+    "square": "Carré",
+    "stories": "Stories",
+    "shareToSocial": "Partager sur les réseaux",
+    "postToX": "Publier sur X",
+    "downloadGif": "Télécharger en GIF",
+    "downloadVideo": "Télécharger en vidéo",
+    "encodingGif": "Encodage du GIF...",
+    "recording": "Enregistrement...",
+    "generatingCard": "Génération de votre carte...",
+    "downloadImage": "Télécharger l’image",
+    "showJourney": "Montrez au monde votre parcours Stellar",
+    "scanToView": "SCANNEZ POUR VOIR",
+    "scanToViewAlt": "Scanner pour voir",
+    "noVibeData": "Aucune donnée de vibe",
+    "downloadPng": "Télécharger le PNG",
+    "downloading": "Téléchargement..."
+  },
+  "Og": {
+    "title": "Le Stellar Wrap de {username}",
+    "description": "Découvrez ce bilan de l’année sur la blockchain Stellar — transactions, personnalité DeFi et vibes.",
+    "shareCardAlt": "Carte de partage Stellar Wrap"
+  }
+}

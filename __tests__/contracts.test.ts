@@ -5,8 +5,11 @@
 
 import {
   isValidContractAddress,
+  isPlaceholderContractAddress,
   getContractAddress,
   getContractConfigForAllNetworks,
+  PLACEHOLDER_CONTRACT_ADDRESS,
+  PlaceholderContractAddressError,
 } from "../config/contracts";
 import { NETWORKS, type Network } from "../src/config";
 
@@ -18,16 +21,12 @@ describe("isValidContractAddress", () => {
     expect(isValidContractAddress(VALID_CONTRACT_ID)).toBe(true);
   });
 
-  it("accepts placeholder address", () => {
-    expect(isValidContractAddress("C" + "A".repeat(55))).toBe(true);
+  it("accepts placeholder address format (still C + 55 A's)", () => {
+    expect(isValidContractAddress(PLACEHOLDER_CONTRACT_ADDRESS)).toBe(true);
   });
 
   it("rejects non-C prefix", () => {
-    expect(
-      isValidContractAddress(
-        "G" + "A".repeat(55)
-      )
-    ).toBe(false);
+    expect(isValidContractAddress("G" + "A".repeat(55))).toBe(false);
   });
 
   it("rejects wrong length", () => {
@@ -36,9 +35,25 @@ describe("isValidContractAddress", () => {
   });
 
   it("rejects invalid base32 characters", () => {
-    expect(
-      isValidContractAddress("C" + "1".repeat(55))
-    ).toBe(false);
+    expect(isValidContractAddress("C" + "1".repeat(55))).toBe(false);
+  });
+});
+
+describe("isPlaceholderContractAddress", () => {
+  it("detects full CAAAAA… placeholder", () => {
+    expect(isPlaceholderContractAddress(PLACEHOLDER_CONTRACT_ADDRESS)).toBe(
+      true,
+    );
+  });
+
+  it("detects partial CAAAAAAA prefix used by legacy bridges", () => {
+    expect(isPlaceholderContractAddress("CAAAAAAAA" + "B".repeat(47))).toBe(
+      true,
+    );
+  });
+
+  it("does not flag a real contract id", () => {
+    expect(isPlaceholderContractAddress(VALID_CONTRACT_ID)).toBe(false);
   });
 });
 
@@ -50,22 +65,56 @@ describe("getContractConfigForAllNetworks", () => {
     expect(config.mainnet).toHaveProperty("contractAddress");
     expect(config.testnet).toHaveProperty("contractAddress");
   });
-
-  it("returns valid contract address format for both networks", () => {
-    const config = getContractConfigForAllNetworks();
-    expect(isValidContractAddress(config.mainnet.contractAddress)).toBe(true);
-    expect(isValidContractAddress(config.testnet.contractAddress)).toBe(true);
-  });
 });
 
-describe("getContractAddress", () => {
-  it("loads address for mainnet and testnet", () => {
-    const mainnetAddr = getContractAddress(NETWORKS.MAINNET);
-    const testnetAddr = getContractAddress(NETWORKS.TESTNET);
-    expect(mainnetAddr).toBeTruthy();
-    expect(testnetAddr).toBeTruthy();
-    expect(isValidContractAddress(mainnetAddr)).toBe(true);
-    expect(isValidContractAddress(testnetAddr)).toBe(true);
+describe("getContractAddress rejects placeholders / missing env", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_MAINNET;
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_TESTNET;
+  });
+
+  it("throws PlaceholderContractAddressError when mainnet env is missing", () => {
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_MAINNET;
+
+    expect(() => getContractAddress(NETWORKS.MAINNET)).toThrow(
+      PlaceholderContractAddressError,
+    );
+    try {
+      getContractAddress(NETWORKS.MAINNET);
+    } catch (e) {
+      expect(e).toBeInstanceOf(PlaceholderContractAddressError);
+      const err = e as PlaceholderContractAddressError;
+      expect(err.userMessage).toMatch(/not ready for minting/i);
+      expect(err.developerHint).toMatch(/NEXT_PUBLIC_CONTRACT_ADDRESS_MAINNET/);
+    }
+  });
+
+  it("throws PlaceholderContractAddressError when testnet env is missing", () => {
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+    delete process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_TESTNET;
+
+    expect(() => getContractAddress(NETWORKS.TESTNET)).toThrow(
+      PlaceholderContractAddressError,
+    );
+    try {
+      getContractAddress(NETWORKS.TESTNET);
+    } catch (e) {
+      expect(e).toBeInstanceOf(PlaceholderContractAddressError);
+      const err = e as PlaceholderContractAddressError;
+      expect(err.developerHint).toMatch(/NEXT_PUBLIC_CONTRACT_ADDRESS_TESTNET/);
+    }
+  });
+
+  it("returns configured address when env is set", () => {
+    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_MAINNET = VALID_CONTRACT_ID;
+    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_TESTNET = VALID_CONTRACT_ID;
+    expect(getContractAddress(NETWORKS.MAINNET)).toBe(VALID_CONTRACT_ID);
+    expect(getContractAddress(NETWORKS.TESTNET)).toBe(VALID_CONTRACT_ID);
   });
 
   it("throws on invalid network", () => {

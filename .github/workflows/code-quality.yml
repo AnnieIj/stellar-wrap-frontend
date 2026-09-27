@@ -1,0 +1,90 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+# Cancel any in-progress run for the same branch/PR so redundant runs
+# do not consume extra minutes when commits are pushed in quick succession.
+concurrency:
+  group: code-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: ESLint, Prettier & TypeScript
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Tool setup ──────────────────────────────────────────────────────────
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # Pinned to match packageManager in package.json (pnpm@10.25.0).
+          version: 10.25.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Restores the pnpm store cache keyed on the lock file so installs
+          # are fast on subsequent runs.
+          cache: pnpm
+
+      # ── Install ─────────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── ESLint ──────────────────────────────────────────────────────────────
+      # Runs the project's configured ESLint rules (eslint.config.mjs).
+      # --max-warnings 0 promotes every warning to a failure so no lint issues
+      # can silently accumulate in the codebase.
+      - name: Run ESLint
+        run: pnpm lint -- --max-warnings 0
+
+      # ── Prettier ────────────────────────────────────────────────────────────
+      # Verifies every tracked file matches the project's Prettier formatting
+      # rules.  Fails with a diff of unformatted files so contributors know
+      # exactly what to fix (run `pnpm format` locally to auto-fix).
+      - name: Run Prettier format check
+        run: pnpm format:check
+
+      # ── TypeScript ──────────────────────────────────────────────────────────
+      # Full type-check without emitting output.  Catches type errors that
+      # ESLint's @typescript-eslint rules may not surface (e.g. generic
+      # inference failures, strict null checks).
+      - name: Run TypeScript type check
+        run: pnpm typecheck
+
+      # ── ESLint SARIF annotations ─────────────────────────────────────────────
+      # Re-run ESLint with SARIF output so findings appear inline on the PR
+      # diff in GitHub Code Scanning.  Uses npx to avoid polluting the global
+      # pnpm store.  Both steps are best-effort (continue-on-error) so a
+      # transient formatter failure never blocks the PR gate above.
+      - name: Generate ESLint SARIF report
+        if: always()
+        continue-on-error: true
+        run: |
+          npx --yes @microsoft/eslint-formatter-sarif@3.1.0 --version >/dev/null 2>&1 || true
+          pnpm lint \
+            --format @microsoft/eslint-formatter-sarif \
+            --output-file eslint-results.sarif \
+            || true
+
+      - name: Upload ESLint SARIF to Code Scanning
+        if: always() && hashFiles('eslint-results.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: eslint-results.sarif
+          category: eslint
