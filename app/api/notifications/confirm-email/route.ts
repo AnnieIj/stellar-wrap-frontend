@@ -6,6 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+// KV_FAILURE: LOUD — cannot confirm the subscription without writing the
+// updated status; errors propagate so the user retries the link.
 import { kvGet, kvSet, SUB_KEY } from "../_lib/kv";
 import { logger } from "@/app/utils/logger";
 import type { SubscriptionRecord } from "@/app/types/notifications";

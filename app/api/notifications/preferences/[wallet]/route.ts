@@ -4,6 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+// KV_FAILURE: GET → DEGRADE (missing record returns 404; transient KV errors
+//             surface as 500 via internalApiError — acceptable for a read).
+//             PUT → LOUD (a failed write means the change was not saved).
 import { kvGet, kvSet, SUB_KEY } from "../../_lib/kv";
 import { logger } from "@/app/utils/logger";
 import type { SubscriptionRecord } from "@/app/types/notifications";
