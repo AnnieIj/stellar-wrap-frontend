@@ -422,11 +422,23 @@ paths:
       operationId: unsubscribe
       summary: Unsubscribe from notifications
       description: |
-        Two modes, mutually exclusive:
-        - `{ "token": "..." }` — one-click unsubscribe using the token from the
-          footer of a notification email.
-        - `{ "walletAddress": "...", "channel": "push" | "email" }` — disable a
-          single channel from the preference page.
+        Two authenticated modes, mutually exclusive (fixes #608 — bare
+        walletAddress is no longer accepted):
+
+        **Token path** (email/SMS unsubscribe links):
+        `{ "token": "<single-use token>", "channel": "email" | "sms" | "push" }`
+        The token is issued server-side, scoped to one channel, expires after
+        24 hours, and is deleted on first use to prevent replay.
+
+        **Proof-of-address path** (authenticated UI):
+        `{ "walletAddress": "G…", "signature": "<base64 Ed25519>", "nonce": "…",
+           "channel": "email" | "sms" | "push" }`
+        The client signs `stellar-wrap-notifications-unsubscribe:<nonce>` with
+        the wallet's private key; the server verifies the signature and rejects
+        replayed nonces.
+
+        A bare `{ walletAddress, channel }` with no token and no signature
+        returns **401 Unauthorized**.
       requestBody:
         required: true
         content:
@@ -437,9 +449,12 @@ paths:
               byToken:
                 value:
                   token: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
-              byChannel:
+                  channel: "email"
+              byProofOfAddress:
                 value:
                   walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+                  signature: "base64encodedEd25519signature=="
+                  nonce: "random-nonce-abc123"
                   channel: "email"
       responses:
         "200":
@@ -451,26 +466,26 @@ paths:
               example:
                 ok: true
         "400":
-          description: Missing token or walletAddress+channel.
+          description: Missing or invalid fields (token, channel, nonce, etc.).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
-                error: "Provide either token or walletAddress+channel"
-        "404":
-          description: Token not found or no subscription for the wallet.
+                error: "channel must be one of: email, sms, push"
+        "401":
+          description: |
+            Authentication failed. Possible causes:
+            - Bare walletAddress supplied without token or signature
+            - Token is invalid, expired, or already used
+            - Ed25519 signature verification failed
+            - Nonce has already been used
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                tokenNotFound:
-                  value:
-                    error: "Token not found"
-                noSubscription:
-                  value:
-                    error: "No subscription found"
+              example:
+                error: "Unauthenticated unsubscribe is not allowed."
         "500":
           description: Internal server error.
           content:
@@ -603,6 +618,76 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "Invalid wallet address"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Internal server error"
+
+  /api/notifications/preferences:
+    post:
+      operationId: updateNotificationPreferences
+      summary: Update notification preferences (proof-of-address)
+      description: |
+        Updates channel preferences for the authenticated wallet owner.
+
+        Authentication: proof-of-address challenge/response.
+        The client must sign `stellar-wrap-notifications-preferences:<nonce>`
+        with the wallet's Ed25519 private key and supply the base64-encoded
+        signature together with the nonce. The server verifies the signature
+        and rejects replayed nonces.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePreferencesRequest"
+            example:
+              walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+              signature: "base64encodedEd25519signature=="
+              nonce: "random-nonce-abc123"
+              preferences:
+                email: true
+                push: false
+      responses:
+        "200":
+          description: Preferences updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  walletAddress:
+                    type: string
+                  preferences:
+                    type: object
+              example:
+                success: true
+                walletAddress: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+                preferences:
+                  email: true
+                  push: false
+        "400":
+          description: Missing or invalid fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "signature must be a valid base64 string"
+        "401":
+          description: Signature verification failed or nonce already used.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Signature verification failed"
         "500":
           description: Internal server error.
           content:
@@ -888,22 +973,72 @@ components:
 
     UnsubscribeRequest:
       type: object
-      description: One of `token` or `walletAddress` + `channel` (mutually exclusive).
+      description: |
+        Two authenticated modes (mutually exclusive). A bare `walletAddress + channel`
+        with no token and no signature is rejected with 401 (fixes #608).
+
+        **Token path**: `{ token, channel }` — single-use token from an email/SMS link.
+        **Proof-of-address path**: `{ walletAddress, signature, nonce, channel }` — Ed25519
+        signed challenge for the authenticated UI.
       properties:
         token:
           type: string
-          description: Unsubscribe token from a notification email.
+          description: Single-use unsubscribe token issued server-side (token path).
           example: "f3a5c1d9e2b8476fa0b1c2d3e4f5a6b7"
         walletAddress:
           type: string
           pattern: "^G[A-Z2-7]{55}$"
-          description: Stellar public key.
+          description: Stellar public key (proof-of-address path only).
           example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        signature:
+          type: string
+          description: |
+            Base64-encoded Ed25519 signature of
+            `stellar-wrap-notifications-unsubscribe:<nonce>` (proof-of-address path).
+          example: "base64encodedEd25519signature=="
+        nonce:
+          type: string
+          description: Random nonce embedded in the signed message (proof-of-address path).
+          example: "random-nonce-abc123"
         channel:
           type: string
-          enum: [push, email]
-          description: Channel to disable on the preference page.
+          enum: [push, email, sms]
+          description: Notification channel to unsubscribe from.
           example: "email"
+
+    UpdatePreferencesRequest:
+      type: object
+      required: [walletAddress, signature, nonce, preferences]
+      description: Proof-of-address authenticated preferences update.
+      properties:
+        walletAddress:
+          type: string
+          pattern: "^G[A-Z2-7]{55}$"
+          description: Stellar public key of the wallet owner.
+          example: "GABQUEIYD4TC2NB3IJEVAV26MVWHG6UBRCHZNHNEVOZLTQGHZ3K5ZEJS"
+        signature:
+          type: string
+          description: |
+            Base64-encoded Ed25519 signature of
+            `stellar-wrap-notifications-preferences:<nonce>`.
+          example: "base64encodedEd25519signature=="
+        nonce:
+          type: string
+          description: Random nonce embedded in the signed message (single-use).
+          example: "random-nonce-abc123"
+        preferences:
+          type: object
+          description: Channel enable/disable flags. Unknown keys are rejected.
+          properties:
+            email:
+              type: boolean
+            sms:
+              type: boolean
+            push:
+              type: boolean
+          example:
+            email: true
+            push: false
 
     OkResponse:
       type: object
