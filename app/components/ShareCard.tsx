@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 import { Share2, Download, Twitter, Loader2, Sparkles } from "lucide-react";
 import { useState, RefObject } from "react";
 import { downloadShareImage } from "../utils/imageExport";
