@@ -1,0 +1,17 @@
+# Build outputs
+.next/
+out/
+build/
+dist/
+storybook-static/
+
+# Dependency directories
+node_modules/
+
+# Auto-generated files
+next-env.d.ts
+tsconfig.tsbuildinfo
+pnpm-lock.yaml
+
+# Public binary/media assets
+public/

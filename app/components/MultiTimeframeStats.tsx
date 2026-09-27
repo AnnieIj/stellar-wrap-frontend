@@ -9,13 +9,20 @@
  * Issue #46
  */
 
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import {
   useMultiTimeframeStore,
   selectIsComplete,
   selectFailedTimeframes,
 } from "@/app/store/multiTimeframeStore";
 import { TIMEFRAME_LABELS, Timeframe } from "@/app/services/multiTimeframeIndexer";
+import { useWrapStore } from "@/app/store/wrapStore";
+
+const WeeklyComparisonChart = lazy(() =>
+  import("@/app/components/WeeklyComparisonChart").then((m) => ({
+    default: m.WeeklyComparisonChart,
+  })),
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -219,8 +226,17 @@ export function MultiTimeframeStats() {
   const isComplete = useMultiTimeframeStore(selectIsComplete);
   const failedTimeframes = useMultiTimeframeStore(selectFailedTimeframes);
   const error = useMultiTimeframeStore((s) => s.error);
+  const results = useMultiTimeframeStore((s) => s.results);
+  const period = useWrapStore((s) => s.period);
 
   const timeframes: Timeframe[] = ["1w", "2w", "1m"];
+
+  const showChart =
+    (period === "monthly" || period === "yearly") &&
+    isComplete &&
+    results["1w"].data !== null &&
+    results["2w"].data !== null &&
+    results["1m"].data !== null;
 
   return (
     <div className="space-y-4">
@@ -265,6 +281,28 @@ export function MultiTimeframeStats() {
 
       {/* Comparison panel — only shown when at least 2 succeeded */}
       {isComplete && <ComparisonPanel />}
+
+      {/* Weekly comparison chart — monthly and yearly periods */}
+      {showChart && (
+        <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-5">
+          <h3 className="text-sm font-semibold text-white mb-4">
+            {period === "yearly"
+              ? "📊 Recent Activity (last 4 weeks of your 2026 year)"
+              : "📊 Weekly Activity (current week vs last 4 weeks)"}
+          </h3>
+          <Suspense
+            fallback={
+              <div className="h-32 rounded-xl bg-white/5 animate-pulse" aria-hidden="true" />
+            }
+          >
+            <WeeklyComparisonChart
+              tx1w={results["1w"].data!.totalTransactions}
+              tx2w={results["2w"].data!.totalTransactions}
+              tx1m={results["1m"].data!.totalTransactions}
+            />
+          </Suspense>
+        </div>
+      )}
     </div>
   );
 }

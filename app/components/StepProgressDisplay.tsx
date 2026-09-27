@@ -1,16 +1,41 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, RotateCcw, X } from "lucide-react";
-import { useIndexingStore } from "@/app/store/indexingStore";
+import { lazy, Suspense } from "react";
+import { useWrapStore } from "@/app/store/wrapStore";
 import { INDEXING_STEPS, STEP_ORDER } from "@/app/types/indexing";
+
+const AlertCircle = lazy(() =>
+  import("lucide-react").then((m) => ({ default: m.AlertCircle }))
+);
+const RotateCcw = lazy(() =>
+  import("lucide-react").then((m) => ({ default: m.RotateCcw }))
+);
+const X = lazy(() =>
+  import("lucide-react").then((m) => ({ default: m.X }))
+);
+
+const motion = {
+  div: lazy(() =>
+    import("framer-motion").then((m) => ({ default: m.motion.div }))
+  ),
+  span: lazy(() =>
+    import("framer-motion").then((m) => ({ default: m.motion.span }))
+  ),
+  button: lazy(() =>
+    import("framer-motion").then((m) => ({ default: m.motion.button }))
+  ),
+};
+
+const AnimatePresence = lazy(() =>
+  import("framer-motion").then((m) => ({ default: m.AnimatePresence }))
+);
 
 interface StepProgressDisplayProps {
   onRetry?: () => void;
   onCancel?: () => void;
 }
 
-export function StepProgressDisplay({
+function StepProgressDisplayBase({
   onRetry,
   onCancel,
 }: StepProgressDisplayProps) {
@@ -20,10 +45,12 @@ export function StepProgressDisplay({
     overallProgress,
     completedSteps,
     totalSteps,
-    error,
+    indexingError,
     estimatedTimeRemaining,
     isLoading,
-  } = useIndexingStore();
+    metrics,
+    startTime,
+  } = useWrapStore();
 
   const formatTime = (ms: number): string => {
     const seconds = Math.ceil(ms / 1000);
@@ -34,7 +61,28 @@ export function StepProgressDisplay({
     return `${minutes}m`;
   };
 
-  if (!isLoading && !error) {
+  // Calculate better ETA using transaction metrics if available
+  const calculateETA = (): number | null => {
+    if (
+      metrics.totalTransactions &&
+      metrics.transactionCount > 0 &&
+      startTime
+    ) {
+      const elapsed = Date.now() - startTime;
+      const transactionsProcessed = metrics.transactionCount;
+      const transactionsRemaining =
+        metrics.totalTransactions - transactionsProcessed;
+      if (transactionsRemaining <= 0) return 0;
+
+      const timePerTransaction = elapsed / transactionsProcessed;
+      return transactionsRemaining * timePerTransaction;
+    }
+    return estimatedTimeRemaining;
+  };
+
+  const eta = calculateETA();
+
+  if (!isLoading && !indexingError) {
     return null;
   }
 
@@ -48,14 +96,19 @@ export function StepProgressDisplay({
     >
       {/* Main Progress Container */}
       <div className="relative rounded-2xl border border-white/10 bg-linear-to-b from-white/5 to-transparent backdrop-blur-xl p-8 space-y-6">
+        {/* Screen Reader Progress Announcer */}
+        <div className="sr-only" aria-live="polite" aria-atomic="true">
+          {!indexingError && (currentStep ? `Step ${completedSteps + 1} of ${totalSteps}: ${INDEXING_STEPS[currentStep].label}. ${Math.floor(overallProgress / 20) * 20}% complete.` : "Preparing your data...")}
+        </div>
+
         {/* Header Section */}
         <div className="space-y-2">
           <h2 className="text-2xl md:text-3xl font-black text-white">
-            {error ? "Indexing Error" : "Indexing Your Wrapped"}
+            {indexingError ? "Indexing Error" : "Indexing Your Wrapped"}
           </h2>
           <p className="text-neutral-400 text-sm md:text-base">
-            {error
-              ? error.message
+            {indexingError
+              ? indexingError.message
               : currentStep
                 ? INDEXING_STEPS[currentStep].description
                 : "Preparing your data..."}
@@ -64,7 +117,7 @@ export function StepProgressDisplay({
 
         {/* Current Step Info */}
         <AnimatePresence mode="wait">
-          {currentStep && !error && (
+          {currentStep && !indexingError && (
             <motion.div
               key={currentStep}
               initial={{ opacity: 0, y: 10 }}
@@ -113,15 +166,16 @@ export function StepProgressDisplay({
             aria-valuenow={currentStep ? stepProgress[currentStep] : 0}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-label={
+              currentStep
+                ? `${INDEXING_STEPS[currentStep].label} progress`
+                : "Step progress"
+            }
           >
-            <motion.div
-              className="h-full bg-linear-to-r from-(--color-theme-primary) to-(--color-theme-primary) rounded-full"
-              initial={{ width: "0%" }}
-              animate={{
-                width: `${currentStep ? stepProgress[currentStep] : 0}%`,
-              }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+            <div
+              className="h-full bg-linear-to-r from-(--color-theme-primary) to-(--color-theme-primary) rounded-full transition-[width] duration-300 ease-out"
               style={{
+                width: `${currentStep ? stepProgress[currentStep] : 0}%`,
                 boxShadow: "var(--color-theme-primary) 0 0 10px",
               }}
             />
@@ -148,13 +202,12 @@ export function StepProgressDisplay({
             aria-valuenow={overallProgress}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-label="Overall indexing progress"
           >
-            <motion.div
-              className="h-full bg-linear-to-r from-(--color-theme-primary) to-(--color-theme-primary)"
-              initial={{ width: "0%" }}
-              animate={{ width: `${overallProgress}%` }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+            <div
+              className="h-full bg-linear-to-r from-(--color-theme-primary) to-(--color-theme-primary) transition-[width] duration-300 ease-out"
               style={{
+                width: `${overallProgress}%`,
                 boxShadow: "var(--color-theme-primary) 0 0 15px",
               }}
             />
@@ -213,43 +266,48 @@ export function StepProgressDisplay({
         </div>
 
         {/* Time Estimate */}
-        {estimatedTimeRemaining && !error && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center text-sm text-neutral-400"
-          >
-            Estimated time remaining:{" "}
-            <span className="font-semibold text-white">
-              {formatTime(estimatedTimeRemaining)}
-            </span>
-          </motion.div>
-        )}
+    {eta !== null && eta > 5000 && !indexingError && (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="text-center text-sm text-neutral-400"
+      >
+        Est. ~<span className="font-semibold text-white">{formatTime(eta)}</span> remaining
+      </motion.div>
+    )}
 
         {/* Error State */}
         <AnimatePresence>
-          {error && (
+          {indexingError && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-3"
+              role="alert"
+              aria-live="assertive"
             >
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-semibold text-red-300">
-                    Error in {INDEXING_STEPS[error.step].label}
+                    Error in {INDEXING_STEPS[indexingError.step].label}
                   </p>
-                  <p className="text-sm text-red-200/80">{error.message}</p>
+                  <p className="text-sm text-red-200/80">{indexingError.message}</p>
                 </div>
               </div>
 
               {/* Error Actions */}
               <div className="flex gap-3 pt-2">
-                {error.recoverable && onRetry && (
+                {indexingError.recoverable && onRetry && (
                   <motion.button
                     onClick={onRetry}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onRetry();
+                      }
+                    }}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     className="flex items-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-sm font-medium text-red-300 transition-colors"
@@ -261,6 +319,12 @@ export function StepProgressDisplay({
                 {onCancel && (
                   <motion.button
                     onClick={onCancel}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onCancel();
+                      }
+                    }}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     className="flex items-center gap-2 px-4 py-2 bg-neutral-500/20 hover:bg-neutral-500/30 border border-neutral-500/30 rounded-lg text-sm font-medium text-neutral-300 transition-colors"
@@ -277,3 +341,31 @@ export function StepProgressDisplay({
     </motion.div>
   );
 }
+
+export function StepProgressDisplay(props: StepProgressDisplayProps) {
+  return (
+    <Suspense
+      fallback={
+        <div role="status" className="w-full max-w-2xl mx-auto px-4">
+          <span className="sr-only">Loading progress display...</span>
+          <div
+            aria-hidden="true"
+            className="relative rounded-2xl border border-white/10 bg-linear-to-b from-white/5 to-transparent backdrop-blur-xl p-8 space-y-6"
+          >
+            <div className="space-y-2">
+              <div className="h-8 w-2/3 rounded bg-white/10 animate-pulse" />
+              <div className="h-4 w-1/2 rounded bg-white/10 animate-pulse" />
+            </div>
+            <div className="h-24 rounded-xl bg-white/5 animate-pulse" />
+            <div className="h-2 rounded-full bg-white/10 animate-pulse" />
+            <div className="h-3 rounded-full bg-white/10 animate-pulse" />
+          </div>
+        </div>
+      }
+    >
+      <StepProgressDisplayBase {...props} />
+    </Suspense>
+  );
+}
+
+export default StepProgressDisplay;

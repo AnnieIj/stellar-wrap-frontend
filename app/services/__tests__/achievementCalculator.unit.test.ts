@@ -8,7 +8,57 @@
  * - Edge cases
  */
 
-import { calculateAchievements } from '../achievementCalculator';
+import { calculateAchievements, assignPersona, generateVibes } from '../achievementCalculator';
+
+const ISO_DATE = '2024-06-15T12:00:00Z';
+
+function makePaymentTx(amount: string, assetCode = 'XLM') {
+  return {
+    created_at: ISO_DATE,
+    operations: [{ type: 'payment', amount, asset_code: assetCode }],
+  };
+}
+
+function makeDeploymentTx(contractId = 'CDEPLOY123') {
+  return {
+    id: 'deploy-tx',
+    created_at: ISO_DATE,
+    operations: [{
+      type: 'invoke_host_function',
+      contract_id: contractId,
+      function: 'HostFunctionTypeCreateContract',
+    }],
+  };
+}
+
+function makeOfferTx(type: 'manage_buy_offer' | 'manage_sell_offer' = 'manage_buy_offer') {
+  return {
+    created_at: ISO_DATE,
+    operations: [{ type, amount: '100', asset_code: 'XLM' }],
+  };
+}
+
+function makePathPaymentTx() {
+  return {
+    created_at: ISO_DATE,
+    operations: [{
+      type: 'path_payment_strict_receive',
+      source_amount: '100',
+      destination_amount: '200',
+    }],
+  };
+}
+
+function makeTrustlineTx() {
+  return {
+    created_at: ISO_DATE,
+    operations: [{ type: 'change_trust' }],
+  };
+}
+
+function repeatTx<T>(tx: T, count: number): T[] {
+  return Array.from({ length: count }, () => ({ ...tx }));
+}
 
 describe('AchievementCalculator - calculateAchievements', () => {
   describe('Volume Calculation', () => {
@@ -452,15 +502,8 @@ describe('AchievementCalculator - calculateAchievements', () => {
       expect(sorobanVibe).toBeDefined();
     });
 
-    it('should assign Bridge Master vibe for path payments', () => {
-      const transactions = [
-        {
-          created_at: new Date().toISOString(),
-          operations: [
-            { type: 'path_payment_strict_receive', amount: '100.0', asset_code: 'XLM' }
-          ]
-        }
-      ];
+    it('should assign Bridge Master vibe for repeated path payments', () => {
+      const transactions = repeatTx(makePathPaymentTx(), 6);
 
       const result = calculateAchievements(transactions);
       
@@ -530,6 +573,185 @@ describe('AchievementCalculator - calculateAchievements', () => {
       const result = calculateAchievements(transactions);
       
       expect(result.dapps.length).toBe(0);
+    });
+  });
+
+  describe('Persona Assignment', () => {
+    it('should assign The Architect for Soroban contract deployments', () => {
+      const result = calculateAchievements([makeDeploymentTx()]);
+      expect(result.persona).toBe('The Architect');
+    });
+
+    it('should assign The Architect for sustained Soroban contract calls', () => {
+      const transactions = repeatTx({
+        created_at: ISO_DATE,
+        operations: [{ type: 'invoke_host_function', contract_id: 'C123' }],
+      }, 5);
+
+      const result = calculateAchievements(transactions);
+      expect(result.persona).toBe('The Architect');
+    });
+
+    it('should assign The Patron for heavy DeFi offer activity', () => {
+      const result = calculateAchievements(repeatTx(makeOfferTx(), 12));
+      expect(result.persona).toBe('The Patron');
+    });
+
+    it('should assign The Collector for trustline accumulation with minimal trading', () => {
+      const transactions = [
+        ...repeatTx(makeTrustlineTx(), 4),
+        makePaymentTx('10'),
+      ];
+
+      const result = calculateAchievements(transactions);
+      expect(result.persona).toBe('The Collector');
+    });
+
+    it('should assign The Trader for swap-heavy activity', () => {
+      const result = calculateAchievements(repeatTx(makePathPaymentTx(), 6));
+      expect(result.persona).toBe('The Trader');
+    });
+
+    it('should assign The Wizard for high-volume activity', () => {
+      const result = calculateAchievements([
+        makePaymentTx('60000'),
+        makePaymentTx('60000'),
+      ]);
+      expect(result.persona).toBe('The Wizard');
+    });
+
+    it('should assign The Explorer as fallback when no specific pattern matches', () => {
+      const result = calculateAchievements([makePaymentTx('100')]);
+      expect(result.persona).toBe('The Explorer');
+    });
+
+    it('should assign The Explorer for empty transactions', () => {
+      const result = calculateAchievements([]);
+      expect(result.persona).toBe('The Explorer');
+    });
+  });
+
+  describe('assignPersona branch coverage', () => {
+    it('should evaluate each persona branch directly', () => {
+      expect(assignPersona({
+        categories: { payments: 0, swaps: 0, contractCalls: 0, offers: 0, trustlines: 0, other: 0 },
+        deploymentCount: 1,
+        contractCallCount: 0,
+        defiTraderCount: 0,
+        dexTradeCount: 0,
+        totalVolume: 0,
+        txCount: 1,
+      })).toBe('The Architect');
+
+      expect(assignPersona({
+        categories: { payments: 0, swaps: 0, contractCalls: 0, offers: 12, trustlines: 0, other: 0 },
+        deploymentCount: 0,
+        contractCallCount: 0,
+        defiTraderCount: 12,
+        dexTradeCount: 12,
+        totalVolume: 0,
+        txCount: 12,
+      })).toBe('The Patron');
+
+      expect(assignPersona({
+        categories: { payments: 1, swaps: 0, contractCalls: 0, offers: 0, trustlines: 4, other: 0 },
+        deploymentCount: 0,
+        contractCallCount: 0,
+        defiTraderCount: 0,
+        dexTradeCount: 0,
+        totalVolume: 10,
+        txCount: 5,
+      })).toBe('The Collector');
+
+      expect(assignPersona({
+        categories: { payments: 1, swaps: 5, contractCalls: 0, offers: 0, trustlines: 0, other: 0 },
+        deploymentCount: 0,
+        contractCallCount: 0,
+        defiTraderCount: 0,
+        dexTradeCount: 5,
+        totalVolume: 500,
+        txCount: 6,
+      })).toBe('The Trader');
+
+      expect(assignPersona({
+        categories: { payments: 2, swaps: 0, contractCalls: 0, offers: 0, trustlines: 0, other: 0 },
+        deploymentCount: 0,
+        contractCallCount: 0,
+        defiTraderCount: 0,
+        dexTradeCount: 0,
+        totalVolume: 120_000,
+        txCount: 2,
+      })).toBe('The Wizard');
+
+      expect(assignPersona({
+        categories: { payments: 1, swaps: 0, contractCalls: 0, offers: 0, trustlines: 0, other: 0 },
+        deploymentCount: 0,
+        contractCallCount: 0,
+        defiTraderCount: 0,
+        dexTradeCount: 0,
+        totalVolume: 100,
+        txCount: 1,
+      })).toBe('The Explorer');
+    });
+  });
+
+  describe('generateVibes branch coverage', () => {
+    it('should cover volume, frequency, contract, and special vibe branches', () => {
+      expect(generateVibes(10, 2_000_000, 0, new Map(), new Map()).some(v => v.tag === 'Whale')).toBe(true);
+      expect(generateVibes(10, 150_000, 0, new Map(), new Map()).some(v => v.tag === 'High Roller')).toBe(true);
+      expect(generateVibes(10, 15_000, 0, new Map(), new Map()).some(v => v.tag === 'Active Trader')).toBe(true);
+      expect(generateVibes(501, 0, 0, new Map(), new Map()).some(v => v.tag === 'Power User')).toBe(true);
+      expect(generateVibes(101, 0, 0, new Map(), new Map()).some(v => v.tag === 'Active')).toBe(true);
+      expect(generateVibes(11, 0, 0, new Map(), new Map()).some(v => v.tag === 'Regular')).toBe(true);
+      expect(generateVibes(1, 0, 0, new Map(), new Map()).some(v => v.tag === 'Selective')).toBe(true);
+      expect(generateVibes(1, 0, 51, new Map(), new Map()).some(v => v.tag === 'Soroban Power User')).toBe(true);
+      expect(generateVibes(1, 0, 11, new Map(), new Map()).some(v => v.tag === 'Soroban Explorer')).toBe(true);
+      expect(generateVibes(1, 0, 1, new Map(), new Map()).some(v => v.tag === 'Contract Curious')).toBe(true);
+
+      const bridgeMap = new Map([['bridge-warrior', 6]]);
+      expect(generateVibes(1, 0, 0, bridgeMap, new Map()).some(v => v.tag === 'Bridge Master')).toBe(true);
+
+      const defiMap = new Map([['defi-trader', 11]]);
+      expect(generateVibes(1, 0, 0, defiMap, new Map()).some(v => v.tag === 'DeFi Enthusiast')).toBe(true);
+
+      const assetMap = new Map(Array.from({ length: 6 }, (_, i) => [`ASSET${i}`, 1]));
+      expect(generateVibes(1, 0, 0, new Map(), assetMap).some(v => v.tag === 'Asset Diversifier')).toBe(true);
+    });
+
+    it('should assign Stellar Explorer when no vibe rules match', () => {
+      const vibes = generateVibes(0, 0, 0, new Map(), new Map());
+      expect(vibes).toEqual([{ tag: 'Stellar Explorer', count: 0 }]);
+    });
+  });
+
+  describe('Operation branch coverage', () => {
+    it('should process additional operation types and skipped transactions', () => {
+      const result = calculateAchievements([
+        { created_at: ISO_DATE, successful: false, operations: [{ type: 'payment', amount: '999' }] },
+        { created_at: ISO_DATE, fee_charged: '100000', operations: [{ type: 'create_account', amount: '10' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'extend_footprint_ttl' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'restore_footprint' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'manage_sell_offer', amount: '25' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'create_passive_sell_offer', amount: '25' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'allow_trust' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'set_trust_line_flags' }] },
+        { created_at: ISO_DATE, operations: [{ type: 'account_merge' }] },
+        {
+          created_at: ISO_DATE,
+          operations: [{
+            type: 'invoke_host_function',
+            contract: 'CCONTRACT789',
+            function: 'SomeCreateContractVariant',
+          }],
+        },
+      ]);
+
+      expect(result.totalTransactions).toBe(9);
+      expect(result.contractCalls).toBe(3);
+      expect(result.gasSpent).toBe(0.01);
+      expect(result.sorobanBuilderSummary?.deploymentCount).toBe(1);
+      expect(result.dexTradingSummary?.sellCount).toBe(2);
+      expect(result.dapps.some(d => d.name === 'CCONTRACT789')).toBe(true);
     });
   });
 });

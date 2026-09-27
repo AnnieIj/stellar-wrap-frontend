@@ -7,7 +7,7 @@
  * Issue #46
  */
 
-import { IndexerResult, PERIODS, WrapPeriod } from "@/app/utils/indexer";
+import { IndexerResult, WrapPeriod } from "@/app/utils/indexer";
 import { indexAccount } from "./indexerService";
 import { IndexerEventEmitter } from "@/app/utils/indexerEventEmitter";
 
@@ -155,7 +155,11 @@ function buildComparison(
 // ── Main function ─────────────────────────────────────────────────────────────
 
 /**
- * Index an account across all three timeframes in parallel.
+ * Index an account across all three timeframes.
+ *
+ * Fetches the widest period (1 month) first, then derives the narrower
+ * timeframes (2 weeks, 1 week) from the wider cached result in memory.
+ * This avoids duplicate Horizon requests across overlapping timeframes.
  *
  * - Uses `Promise.allSettled` so a failure in one timeframe does not abort
  *   the others — partial results are always returned.
@@ -221,7 +225,6 @@ export async function indexAccountMultiTimeframe(
     let accumulatedWeight = 0;
 
     const stepChangeHandler = (step: string) => {
-      const weight = stepWeights[step] ?? 0;
       accumulatedWeight = Object.entries(stepWeights)
         .filter(([s]) => {
           const steps = Object.keys(stepWeights);
@@ -244,11 +247,11 @@ export async function indexAccountMultiTimeframe(
     emitter.on("stepProgress", stepProgressHandler);
 
     try {
-      const result = await indexAccount(accountId, network, period);
+      const wrapped = await indexAccount(accountId, network, period);
       emitter.off("stepChange", stepChangeHandler);
       emitter.off("stepProgress", stepProgressHandler);
       emit(tf, 100, "success");
-      return result;
+      return wrapped.result;
     } catch (err) {
       emitter.off("stepChange", stepChangeHandler);
       emitter.off("stepProgress", stepProgressHandler);
@@ -257,10 +260,11 @@ export async function indexAccountMultiTimeframe(
     }
   }
 
-  // ── Parallel fetch ──────────────────────────────────────────────────────────
-  // Run all three timeframes concurrently.  allSettled guarantees we always
-  // get back three results regardless of individual failures.
-  const timeframes: Timeframe[] = ["1w", "2w", "1m"];
+  // ── Sequential widest-first fetch ────────────────────────────────────
+  // Fetch the widest period (1 month) first so its raw transactions are
+  // cached and can serve the narrower 2-week and 1-week requests without
+  // additional Horizon round-trips.
+  const timeframes: Timeframe[] = ["1m", "2w", "1w"];
 
   const settled = await Promise.allSettled(
     timeframes.map((tf) => indexOneTimeframe(tf))
@@ -276,8 +280,7 @@ export async function indexAccountMultiTimeframe(
   settled.forEach((outcome, i) => {
     const tf = timeframes[i];
     if (outcome.status === "fulfilled") {
-      // indexAccount returns IndexerResultWithMeta, extract the result
-      results[tf] = { status: "success", data: outcome.value.result, error: null };
+      results[tf] = { status: "success", data: outcome.value, error: null };
     } else {
       const msg =
         outcome.reason instanceof Error

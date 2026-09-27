@@ -31,19 +31,23 @@ export function TopDapps() {
         }}
         className="space-y-0"
       >
-        <h1 className="text-[48px] md:text-[72px] lg:text-[90px] font-black leading-[0.95] tracking-tight text-white uppercase">
-          Your Top
-        </h1>
         <h1
-          className="text-[48px] md:text-[72px] lg:text-[90px] font-black leading-[0.95] tracking-tight uppercase"
-          style={{
-            background: "linear-gradient(180deg, #B4F4D1 0%, #1DB954 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            filter: "drop-shadow(0 0 30px rgba(29, 185, 84, 0.4))",
-          }}
+          data-story-heading="true"
+          tabIndex={-1}
+          className="text-[48px] md:text-[72px] lg:text-[90px] font-black leading-[0.95] tracking-tight uppercase focus:outline-none"
         >
-          Dapps
+          <span className="block text-white">Your Top</span>
+          <span
+            className="block"
+            style={{
+              background: "linear-gradient(180deg, #B4F4D1 0%, #1DB954 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              filter: "drop-shadow(0 0 30px rgba(29, 185, 84, 0.4))",
+            }}
+          >
+            Dapps
+          </span>
         </h1>
       </motion.div>
 
@@ -59,6 +63,8 @@ export function TopDapps() {
             key={dapp.name}
             rank={index + 1}
             name={dapp.name}
+            icon={dapp.icon}
+            logo={dapp.logo}
             interactions={dapp.interactions}
             delay={index * 0.15}
           />

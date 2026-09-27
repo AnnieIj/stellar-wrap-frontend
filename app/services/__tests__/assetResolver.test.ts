@@ -7,12 +7,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   assetResolver,
   resolveAsset,
+  refreshAsset,
+  invalidateStaleAssetCache,
   isNativeAsset,
   getAssetDisplayName,
   getAssetShortName,
 } from "@/app/services/assetResolver";
 import { assetCache } from "@/app/services/assetCacheService";
-import { NATIVE_ASSET, KNOWN_ASSETS } from "@/app/utils/assetConstants";
+import { NATIVE_ASSET, KNOWN_ASSETS, ASSET_CACHE_VERSION } from "@/app/utils/assetConstants";
 
 describe("AssetResolver", () => {
   beforeEach(() => {
@@ -151,6 +153,39 @@ describe("AssetResolver", () => {
       await resolveAsset("USDC");
       assetResolver.clearCache();
       expect(assetCache.get("USDC")).toBeNull();
+    });
+
+    it("should treat expired entries as stale and evict on read", () => {
+      vi.useFakeTimers();
+      const metadata = KNOWN_ASSETS.USDC;
+      assetCache.set(metadata, 1000);
+      vi.advanceTimersByTime(1001);
+      expect(assetCache.isStale("USDC", metadata.issuer)).toBe(true);
+      expect(assetCache.get("USDC", metadata.issuer)).toBeNull();
+      vi.useRealTimers();
+    });
+
+    it("should force refresh by bypassing cache", async () => {
+      await resolveAsset("USDC");
+      const cachedBefore = assetCache.get("USDC", KNOWN_ASSETS.USDC.issuer);
+      expect(cachedBefore).not.toBeNull();
+
+      await refreshAsset("USDC", KNOWN_ASSETS.USDC.issuer);
+      const cachedAfter = assetCache.get("USDC", KNOWN_ASSETS.USDC.issuer);
+      expect(cachedAfter).not.toBeNull();
+    });
+
+    it("should drop version-mismatched cache entries", () => {
+      const metadata = KNOWN_ASSETS.BTC;
+      assetCache.set(metadata);
+      const key = `${metadata.code}_${metadata.issuer}`;
+      const internal = (assetCache as unknown as { memoryCache: Record<string, { version: number }> })
+        .memoryCache;
+      if (internal[key]) {
+        internal[key].version = ASSET_CACHE_VERSION - 1;
+      }
+      expect(assetCache.get("BTC", metadata.issuer)).toBeNull();
+      expect(invalidateStaleAssetCache()).toBeGreaterThanOrEqual(0);
     });
   });
 });

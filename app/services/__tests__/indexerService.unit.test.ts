@@ -19,6 +19,7 @@ jest.mock('@/app/utils/indexerEventEmitter', () => ({
       emitStepComplete: jest.fn(),
       emitIndexingComplete: jest.fn(),
       emitStepError: jest.fn(),
+      emitMetricsUpdate: jest.fn(),
       on: jest.fn(),
       off: jest.fn(),
       removeAllListeners: jest.fn(),
@@ -131,8 +132,8 @@ describe('IndexerService - indexAccount', () => {
       ];
 
       transactionsCallMock
-        .mockResolvedValueOnce({ records: mockTransactions })
-        .mockResolvedValueOnce({ records: [] });
+        .mockResolvedValueOnce({ records: mockTransactions, _links: { next: { href: 'abc' } } })
+        .mockResolvedValueOnce({ records: [], _links: { next: null } });
 
       const result = await indexAccount('GABCDEF123456789', 'mainnet', 'monthly');
 
@@ -141,7 +142,7 @@ describe('IndexerService - indexAccount', () => {
     }, 15000);
 
     it('should stop fetching when no more records', async () => {
-      transactionsCallMock.mockResolvedValue({ records: [] });
+      transactionsCallMock.mockResolvedValue({ records: [], _links: { next: null } });
 
       await indexAccount('GABCDEF123456789', 'mainnet', 'monthly');
 
@@ -232,7 +233,7 @@ describe('IndexerService - indexAccount', () => {
       };
 
       // Mock the cache functions from the indexer utils
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- jest.mock() is hoisted; require() here accesses the mocked module after setup
       const { isCacheValid: indexerIsCacheValid } = require('@/app/utils/indexer');
       (indexerIsCacheValid as jest.Mock).mockReturnValue(true);
       (getCacheEntry as jest.Mock).mockResolvedValue(cachedResult);
@@ -247,17 +248,67 @@ describe('IndexerService - indexAccount', () => {
       (getCacheEntry as jest.Mock).mockResolvedValue(null);
       (isCacheValid as jest.Mock).mockReturnValue(false);
 
-      transactionsCallMock.mockResolvedValue({ records: [] });
+      transactionsCallMock.mockResolvedValue({ records: [], _links: { next: null } });
 
       await indexAccount('GABCDEF123456789', 'mainnet', 'monthly');
 
       expect(transactionsCallMock).toHaveBeenCalled();
     }, 15000);
+
+    it('should use wider cached transactions to serve a narrower period without a Horizon request', async () => {
+      const now = new Date();
+      const sixDaysAgo = new Date(now);
+      sixDaysAgo.setDate(sixDaysAgo.getDate() - 6);
+      const eightDaysAgo = new Date(now);
+      eightDaysAgo.setDate(eightDaysAgo.getDate() - 8);
+
+      const widerTransactions = [
+        {
+          id: '1',
+          created_at: sixDaysAgo.toISOString(),
+          paging_token: 'token1',
+          operations: jest.fn().mockResolvedValue({ records: [{ type: 'payment', amount: '100.0' }] }),
+        },
+        {
+          id: '2',
+          created_at: eightDaysAgo.toISOString(),
+          paging_token: 'token2',
+          operations: jest.fn().mockResolvedValue({ records: [{ type: 'payment', amount: '50.0' }] }),
+        },
+      ];
+
+      // Monthly cache has valid data with raw transactions; biweekly misses
+      (getCacheEntry as jest.Mock)
+        .mockResolvedValueOnce(null) // exact-period miss for weekly
+        .mockResolvedValueOnce(null) // biweekly miss
+        .mockResolvedValueOnce({
+          result: {
+            accountId: 'GABCDEF123456789',
+            totalTransactions: 2,
+            totalVolume: 150,
+            mostActiveAsset: 'XLM',
+            contractCalls: 0,
+            gasSpent: 0,
+            dapps: [],
+            vibes: [],
+          },
+          timestamp: Date.now(),
+          transactions: widerTransactions,
+        }); // monthly hit
+
+      (isCacheValid as jest.Mock).mockReturnValue(true);
+
+      const result = await indexAccount('GABCDEF123456789', 'mainnet', 'weekly');
+
+      // Should derive result from wider cache — no Horizon request needed
+      expect(mockServer.transactions).not.toHaveBeenCalled();
+      expect(result.totalTransactions).toBe(1); // only the 6-days-ago tx is within 7 days
+    });
   });
 
   describe('Network Support', () => {
     it('should work with mainnet', async () => {
-      transactionsCallMock.mockResolvedValue({ records: [] });
+      transactionsCallMock.mockResolvedValue({ records: [], _links: { next: null } });
 
       const result = await indexAccount('GABCDEF123456789', 'mainnet', 'monthly');
 
@@ -266,7 +317,7 @@ describe('IndexerService - indexAccount', () => {
     }, 15000);
 
     it('should work with testnet', async () => {
-      transactionsCallMock.mockResolvedValue({ records: [] });
+      transactionsCallMock.mockResolvedValue({ records: [], _links: { next: null } });
 
       const result = await indexAccount('GABCDEF123456789', 'testnet', 'monthly');
 
@@ -280,7 +331,7 @@ describe('IndexerService - indexAccount', () => {
       const periods = ['weekly', 'monthly', 'yearly'] as const;
       
       for (const period of periods) {
-        transactionsCallMock.mockResolvedValue({ records: [] });
+        transactionsCallMock.mockResolvedValue({ records: [], _links: { next: null } });
         const result = await indexAccount('GABCDEF123456789', 'mainnet', period);
         expect(result).toBeDefined();
       }
@@ -310,7 +361,7 @@ describe('IndexerService - indexAccount', () => {
       };
 
       transactionsCallMock
-        .mockResolvedValueOnce({ records: [recentTx, oldTx] })
+        .mockResolvedValueOnce({ records: [recentTx, oldTx], _links: { next: { href: 'next' } } })
         .mockResolvedValueOnce({ records: [] });
 
       const result = await indexAccount('GABCDEF123456789', 'mainnet', 'weekly');
@@ -341,7 +392,7 @@ describe('IndexerService - indexAccount', () => {
       };
 
       transactionsCallMock
-        .mockResolvedValueOnce({ records: [recentTx, oldTx] })
+        .mockResolvedValueOnce({ records: [recentTx, oldTx], _links: { next: { href: 'next' } } })
         .mockResolvedValueOnce({ records: [] });
 
       const result = await indexAccount('GABCDEF123456789', 'mainnet', 'biweekly');
@@ -371,7 +422,7 @@ describe('IndexerService - indexAccount', () => {
       };
 
       transactionsCallMock
-        .mockResolvedValueOnce({ records: [recentTx, oldTx] })
+        .mockResolvedValueOnce({ records: [recentTx, oldTx], _links: { next: { href: 'next' } } })
         .mockResolvedValueOnce({ records: [] });
 
       const result = await indexAccount('GABCDEF123456789', 'mainnet', 'monthly');
@@ -393,7 +444,7 @@ describe('IndexerService - indexAccount', () => {
       };
 
       transactionsCallMock
-        .mockResolvedValueOnce({ records: [boundaryTx] })
+        .mockResolvedValueOnce({ records: [boundaryTx], _links: { next: { href: 'next' } } })
         .mockResolvedValueOnce({ records: [] });
 
       const result = await indexAccount('GABCDEF123456789', 'mainnet', 'weekly');

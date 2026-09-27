@@ -8,11 +8,13 @@ import { Network, isValidNetwork } from "../../src/config";
 import {
   getContractAddress,
   isValidContractAddress,
+  isPlaceholderContractAddress,
 } from "../../config/contracts";
 import {
   ContractConfigurationError,
   InvalidContractAddressError,
   ContractNotFoundError,
+  PlaceholderContractError,
 } from "./contractErrors";
 
 /** Contract instance cache per network */
@@ -37,9 +39,13 @@ export function getContractInstance(network: Network): Contract {
     return cached;
   }
 
+  // getContractAddress already rejects placeholders; double-check for defense in depth
   const address = getContractAddress(network);
   if (!isValidContractAddress(address)) {
     throw new InvalidContractAddressError(address, network);
+  }
+  if (isPlaceholderContractAddress(address)) {
+    throw new PlaceholderContractError(network);
   }
 
   try {
@@ -47,6 +53,12 @@ export function getContractInstance(network: Network): Contract {
     contractInstanceCache[network] = contract;
     return contract;
   } catch (err) {
+    if (
+      err instanceof PlaceholderContractError ||
+      (err && typeof err === "object" && "name" in err && err.name === "PlaceholderContractAddressError")
+    ) {
+      throw err;
+    }
     throw new ContractNotFoundError(network, err);
   }
 }
