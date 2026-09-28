@@ -619,3 +619,8 @@ feat(store): consolidate state into wrapStore
 
 BREAKING CHANGE: legacy store exports removed; update imports to useWrapStore.
 ```
+
+## Handsoff notes
+
+<!-- handsoff-issue-604 -->
+- #604: test(utils): `app/utils` has partial test coverage with no stated standard
