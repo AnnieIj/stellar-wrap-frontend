@@ -19,6 +19,7 @@
     "test:integration:ui": "vitest --ui",
     "test:hooks": "vitest run --config vitest.hooks.config.ts",
     "test": "pnpm test:unit && pnpm test:integration",
+    "test:ci": "pnpm test:unit --ci && pnpm test:integration",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test --project=e2e-chromium",
