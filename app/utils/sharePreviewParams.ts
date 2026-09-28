@@ -54,14 +54,12 @@ export const KNOWN_VIBES = [
   "Code Alchemist",
   "DeFi Degen",
 ] as const;
-const SAFE_ARCHETYPE_PATH = /^\/archetypes\/[\w-]+\.(png|jpg|jpeg|webp)$/i;
+const SAFE_ARCHETYPE_PATH =
+  /^\/archetypes\/(?:(?:og|responsive\/\d+)\/)?[\w-]+\.(png|jpg|jpeg|webp)$/i;
 
 type SearchParamInput = URLSearchParams | Record<string, string | string[] | undefined>;
 
-function readParam(
-  input: SearchParamInput,
-  key: string,
-): string | undefined {
+function readParam(input: SearchParamInput, key: string): string | undefined {
   if (input instanceof URLSearchParams) {
     return input.get(key) ?? undefined;
   }
@@ -88,7 +86,7 @@ function sanitizeUsername(value: string | undefined): string | undefined {
 function matchKnown(
   value: string | undefined,
   allowed: readonly string[],
-  maxLen: number,
+  maxLen: number
 ): string | undefined {
   const text = sanitizeText(value, maxLen)?.toLowerCase();
   if (!text) return undefined;
@@ -105,12 +103,9 @@ function parseBoundedInt(value: string | undefined, min: number, max: number): n
 /**
  * Parse and validate share preview query params. Invalid fields fall back to defaults.
  */
-export function parseSharePreviewParams(
-  input: SearchParamInput,
-): SharePreviewState {
+export function parseSharePreviewParams(input: SearchParamInput): SharePreviewState {
   const username =
-    sanitizeUsername(readParam(input, "username")) ??
-    SHARE_PREVIEW_DEFAULTS.username;
+    sanitizeUsername(readParam(input, "username")) ?? SHARE_PREVIEW_DEFAULTS.username;
   const persona =
     matchKnown(readParam(input, "persona"), KNOWN_PERSONAS, MAX_PERSONA_LEN) ??
     SHARE_PREVIEW_DEFAULTS.persona;
@@ -143,9 +138,7 @@ export function parseSharePreviewParams(
   };
 }
 
-export function buildSharePreviewSearchParams(
-  preview: SharePreviewState,
-): URLSearchParams {
+export function buildSharePreviewSearchParams(preview: SharePreviewState): URLSearchParams {
   const params = new URLSearchParams();
   params.set("username", preview.username);
   params.set("transactions", String(preview.transactions));
@@ -158,16 +151,20 @@ export function buildSharePreviewSearchParams(
   return params;
 }
 
-export function buildPublicSharePath(
-  preview: SharePreviewState,
-  locale = "en",
-): string {
+export function buildPublicSharePath(preview: SharePreviewState, locale = "en"): string {
   const query = buildSharePreviewSearchParams(preview).toString();
   return `/${locale}/share?${query}`;
 }
 
 export function hasSharePreviewParams(input: SearchParamInput): boolean {
-  const keys = ["username", "transactions", "persona", "topVibe", "vibePercentage", "archetypeImage"];
+  const keys = [
+    "username",
+    "transactions",
+    "persona",
+    "topVibe",
+    "vibePercentage",
+    "archetypeImage",
+  ];
   return keys.some((key) => {
     const value = readParam(input, key);
     return value !== undefined && value !== "";

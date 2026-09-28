@@ -39,6 +39,8 @@
     "validate:env": "node scripts/validate-env.js",
     "validate:i18n": "node scripts/validate-i18n.js",
     "optimize:svgs": "node scripts/optimize-featured-svgs.mjs",
+    "optimize:archetypes": "node scripts/optimize-archetypes.mjs",
+    "check:archetype-budget": "node scripts/check-archetype-budget.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -97,6 +99,7 @@
     "jsdom": "^29.1.1",
     "prettier": "3.4.2",
     "prettier-plugin-tailwindcss": "0.6.12",
+    "sharp": "^0.35.5",
     "storybook": "^10.4.6",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
