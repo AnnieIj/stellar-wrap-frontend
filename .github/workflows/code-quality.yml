@@ -66,6 +66,14 @@ jobs:
       - name: Run TypeScript type check
         run: pnpm typecheck
 
+      # ── Unit tests ──────────────────────────────────────────────────────────
+      # Runs the full unit test suite on every pull request.  `pnpm test`
+      # executes both halves of the suite (the two test scripts defined in
+      # package.json), so a failure in either half fails this required check
+      # and blocks the PR from merging.
+      - name: Run unit tests
+        run: pnpm test
+
       # ── ESLint SARIF annotations ─────────────────────────────────────────────
       # Re-run ESLint with SARIF output so findings appear inline on the PR
       # diff in GitHub Code Scanning.  Uses npx to avoid polluting the global

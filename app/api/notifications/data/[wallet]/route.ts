@@ -6,6 +6,9 @@
  * belong to this wallet. Permanently removes the subscription record
  * (including the email address), period index entries, and dispatch logs.
  * See ../../_lib/deleteNotificationData.ts for the dispatch log retention policy.
+ *
+ * Proof of address control is required: the caller must present a signed
+ * challenge from the connected wallet (see ../../_lib/walletAuth.ts).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +18,7 @@ import {
   findWalletByUnsubscribeToken,
   sendDeletionConfirmation,
 } from "../../_lib/deleteNotificationData";
+import { verifyWalletAuth } from "../../_lib/walletAuth";
 import { logger, maskAddress } from "@/app/utils/logger";
 import { apiError, internalApiError } from "@/app/api/_lib/apiError";
 
@@ -37,8 +41,15 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const token = request.nextUrl.searchParams.get("token");
-    if (token && (await findWalletByUnsubscribeToken(token)) !== wallet) {
-      return apiError("INVALID_UNSUBSCRIBE_TOKEN", "Token not found", 401);
+    const hasValidToken = token && (await findWalletByUnsubscribeToken(token)) === wallet;
+
+    // Require proof of address control unless the caller presents a valid
+    // wallet-scoped unsubscribe token (e.g. from an email link).
+    if (!hasValidToken) {
+      const auth = await verifyWalletAuth(request, wallet);
+      if (!auth.ok) {
+        return apiError("UNAUTHENTICATED", "Wallet authentication required", 401);
+      }
     }
 
     const { emailAddress } = await deleteNotificationData(wallet);
