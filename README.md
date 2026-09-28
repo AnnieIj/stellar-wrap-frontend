@@ -619,3 +619,8 @@ feat(store): consolidate state into wrapStore
 
 BREAKING CHANGE: legacy store exports removed; update imports to useWrapStore.
 ```
+
+## Handsoff notes
+
+<!-- handsoff-issue-270 -->
+- #270: feat(persona): prevent repeated confetti bursts on rapid card taps
