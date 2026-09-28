@@ -85,3 +85,20 @@ config per genuinely distinct environment:
 - One config per genuinely distinct environment, with no Jest configs left.
 - This document states the boundary so a contributor knows which runner to use
   for a new test.
+
+## Config wiring (issue #596)
+
+Every config file in the repo must be invoked by a script, or deleted. The
+current wiring is:
+
+| Config | Invoked by |
+| --- | --- |
+| `vitest.config.ts` | `test:unit`, `test:components`, `test:integration` |
+| `vitest.hooks.config.ts` | `test:hooks` |
+
+`jest.config.js` and `jest.config.components.js` are no longer referenced by
+any script and have been deleted, so no config is dead. The component suite
+runs under the `jsdom` project in `vitest.config.ts` via `test:components`,
+which means the component tests referenced by open issues #418, #420, #422,
+and #488 will execute once written — they are picked up by the same
+`test:components` script and CI job as the rest of the component suite.

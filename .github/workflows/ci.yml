@@ -64,6 +64,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Test components
+        run: pnpm test:components
       
       - name: Type check
         run: pnpm typecheck
@@ -88,6 +91,6 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage-report-${ { github.run_id }}-${ { github.run_attempt }}
+          name: coverage-report-${ { github.run_id }}-${ { github.run_attempt } }
           path: coverage/
           retention-days: 30

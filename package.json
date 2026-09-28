@@ -18,6 +18,7 @@
     "test:integration:watch": "vitest --config vitest.config.ts",
     "test:integration:ui": "vitest --ui --config vitest.config.ts",
     "test:hooks": "vitest run --config vitest.hooks.config.ts",
+    "test:components": "vitest run --config vitest.config.ts",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:watch": "vitest --config vitest.config.ts",
     "test:coverage": "vitest run --coverage --config vitest.config.ts",
