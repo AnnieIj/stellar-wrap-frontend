@@ -11,12 +11,15 @@ const CACHE_CONTROL = 'public, s-maxage=86400, stale-while-revalidate=604800';
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const username = searchParams.get('username') || 'StellarUser';
-    const transactions = searchParams.get('transactions') || '0';
-    const persona = searchParams.get('persona') || 'Network Pioneer';
-    const topVibe = searchParams.get('topVibe') || 'Steady';
-    const vibePercentage = searchParams.get('vibePercentage') || '0';
-    const archetypeImagePath = searchParams.get('archetypeImage') ||
+    const {
+      username,
+      transactions,
+      persona,
+      topVibe,
+      vibePercentage,
+      archetypeImage,
+    } = parseSharePreviewParams(searchParams);
+    const archetypeImagePath = archetypeImage ||
       `/archetypes/${persona.toLowerCase().replace(/^the\s+/, '').replace(/\s+/g, '-')}.png`;
 
     const baseUrl = req.nextUrl.origin;
