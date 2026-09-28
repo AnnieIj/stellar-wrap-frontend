@@ -98,6 +98,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Test components
+        run: pnpm test:components
       
       - name: Type check
         run: pnpm typecheck
