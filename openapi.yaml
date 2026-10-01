@@ -36,9 +36,13 @@ paths:
         Fetches and indexes on-chain transaction history for the given Stellar
         address and returns aggregated statistics for the requested period.
 
-        **Caching**: Results are cached in IndexedDB for 60 minutes.
-        Subsequent requests within that window return `cached: true` and may
-        trigger a background re-index (`refreshingInBackground: true`).
+        **Caching**: this endpoint is stateless and holds no cache of its own;
+        every request re-indexes against Horizon. The `cached`,
+        `cacheTimestamp` and `refreshingInBackground` fields describe the
+        60-minute IndexedDB cache that browser clients layer on top (TTL is
+        `CACHE_TTL_MINUTES` in `app/utils/indexer.ts`). They are always present
+        in the response so a client can rely on their shape; for a direct API
+        call they are `false`, `null` and `false`.
 
         **Rate limiting**: Horizon may respond with HTTP 429. The server
         propagates this as a 429 response to the caller.
@@ -1053,7 +1057,10 @@ components:
             $ref: "#/components/schemas/WrappedVibe"
         cached:
           type: boolean
-          description: True when served from the 60-minute IndexedDB cache.
+          description: |
+            True when the payload was served from the client's 60-minute
+            IndexedDB cache. Always `false` from the API itself, which does not
+            cache.
         cacheTimestamp:
           type: [string, "null"]
           format: date-time
