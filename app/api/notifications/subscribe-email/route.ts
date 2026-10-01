@@ -14,7 +14,7 @@ const log = logger.child("api:subscribe-email");
 import {
   getClientIp,
   checkRateLimit,
-  rateLimitResponse,
+  rateLimitDenialResponse,
   SUBSCRIBE_EMAIL_IP_LIMIT,
   SUBSCRIBE_EMAIL_IP_WINDOW,
   SUBSCRIBE_EMAIL_TARGET_LIMIT,
@@ -32,14 +32,16 @@ function isValidWallet(address: string): boolean {
 export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request);
-    const ipLimitResult = await checkRateLimit(
-      `ratelimit:ip:subscribe-email:${ip}`,
-      SUBSCRIBE_EMAIL_IP_LIMIT,
-      SUBSCRIBE_EMAIL_IP_WINDOW
+    const ipDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:ip:subscribe-email:${ip}`,
+        SUBSCRIBE_EMAIL_IP_LIMIT,
+        SUBSCRIBE_EMAIL_IP_WINDOW
+      )
     );
 
-    if (!ipLimitResult.allowed) {
-      return rateLimitResponse(ipLimitResult.resetInSeconds);
+    if (ipDenial) {
+      return ipDenial;
     }
 
     const body = await request.json();
@@ -59,17 +61,19 @@ export async function POST(request: NextRequest) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const emailLimitResult = await checkRateLimit(
-      `ratelimit:email:subscribe-email:${normalizedEmail}`,
-      SUBSCRIBE_EMAIL_TARGET_LIMIT,
-      SUBSCRIBE_EMAIL_TARGET_WINDOW
+    // Keyed on the target address, so the same mailbox cannot be mailed over
+    // and over from a rotating set of source IPs.
+    const emailDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:email:subscribe-email:${normalizedEmail}`,
+        SUBSCRIBE_EMAIL_TARGET_LIMIT,
+        SUBSCRIBE_EMAIL_TARGET_WINDOW
+      ),
+      "Too many requests for this email address. Please try again later."
     );
 
-    if (!emailLimitResult.allowed) {
-      return rateLimitResponse(
-        emailLimitResult.resetInSeconds,
-        "Too many requests for this email address. Please try again later."
-      );
+    if (emailDenial) {
+      return emailDenial;
     }
 
     const existing = (await kvGet<SubscriptionRecord>(SUB_KEY(walletAddress))) ?? {

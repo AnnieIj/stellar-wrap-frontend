@@ -6,6 +6,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { kvGet, kvSet } from "./kv";
+import { logger } from "@/app/utils/logger";
+
+const log = logger.child("api:notifications:rateLimit");
 
 export interface RateLimitRecord {
   count: number;
@@ -16,6 +19,12 @@ export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetInSeconds: number;
+  /**
+   * Set when the request was denied because the KV backend could not be
+   * reached, not because the caller exceeded the limit. Callers use this to
+   * answer 503 (limiter unavailable) instead of 429 (over the limit).
+   */
+  unavailable?: boolean;
 }
 
 // Default rate limits
@@ -27,6 +36,35 @@ export const SUBSCRIBE_EMAIL_IP_WINDOW = 60; // per 60 seconds
 
 export const SUBSCRIBE_EMAIL_TARGET_LIMIT = 3; // 3 requests
 export const SUBSCRIBE_EMAIL_TARGET_WINDOW = 60; // per 60 seconds
+
+// Per-target limit for the push subscribe route, so one wallet cannot be
+// pushed at by many different source IPs.
+export const SUBSCRIBE_WALLET_LIMIT = 10; // 10 requests
+export const SUBSCRIBE_WALLET_WINDOW = 60; // per 60 seconds
+
+// PUT /api/notifications/preferences/:wallet
+export const PREFERENCES_IP_LIMIT = 30;
+export const PREFERENCES_IP_WINDOW = 60;
+export const PREFERENCES_WALLET_LIMIT = 20;
+export const PREFERENCES_WALLET_WINDOW = 60;
+
+// POST /api/notifications/unsubscribe
+export const UNSUBSCRIBE_IP_LIMIT = 10;
+export const UNSUBSCRIBE_IP_WINDOW = 60;
+export const UNSUBSCRIBE_TARGET_LIMIT = 5;
+export const UNSUBSCRIBE_TARGET_WINDOW = 60;
+
+// GET /api/notifications/confirm-email (state-changing: it activates a
+// subscription, so it is throttled like a write).
+export const CONFIRM_EMAIL_IP_LIMIT = 20;
+export const CONFIRM_EMAIL_IP_WINDOW = 60;
+export const CONFIRM_EMAIL_TOKEN_LIMIT = 10;
+export const CONFIRM_EMAIL_TOKEN_WINDOW = 60;
+
+/**
+ * Retry-After advertised when the limiter itself is unavailable.
+ */
+export const RATE_LIMIT_UNAVAILABLE_RETRY_SECONDS = 30;
 
 /**
  * Extracts the client's IP address from a NextRequest.
@@ -62,6 +100,28 @@ export async function checkRateLimit(
   limit: number,
   windowSeconds: number,
 ): Promise<RateLimitResult> {
+  // Fail closed. If KV cannot be read or written the limiter cannot know how
+  // many requests have already been served, so it denies rather than letting
+  // an unbounded number of requests through. A read failure that fell back to
+  // "no record" would reset every counter and silently disable the limit.
+  try {
+    return await checkRateLimitUnsafe(key, limit, windowSeconds);
+  } catch (err) {
+    log.error("rate limit backend unavailable; failing closed", { key, err });
+    return {
+      allowed: false,
+      remaining: 0,
+      resetInSeconds: RATE_LIMIT_UNAVAILABLE_RETRY_SECONDS,
+      unavailable: true,
+    };
+  }
+}
+
+async function checkRateLimitUnsafe(
+  key: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<RateLimitResult> {
   const now = Date.now();
   const record = await kvGet<RateLimitRecord>(key);
 
@@ -91,6 +151,45 @@ export async function checkRateLimit(
     remaining: limit - updatedCount,
     resetInSeconds: Math.max(1, Math.ceil((record.resetAt - now) / 1000)),
   };
+}
+
+/**
+ * Turns a denied result into the right response, or null when allowed.
+ *
+ * 429 means "you are over the limit"; 503 means "the limiter could not run".
+ * Both deny the request, so an unavailable KV can never be used to bypass
+ * throttling.
+ */
+export function rateLimitDenialResponse(
+  result: RateLimitResult,
+  message?: string,
+): NextResponse | null {
+  if (result.allowed) {
+    return null;
+  }
+  if (result.unavailable) {
+    return rateLimitUnavailableResponse();
+  }
+  return rateLimitResponse(result.resetInSeconds, message);
+}
+
+/**
+ * Returns a 503 when the rate limiter's backing store is unavailable. The
+ * request is refused, so this is a fail-closed answer, not a fail-open one.
+ */
+export function rateLimitUnavailableResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      error: "Rate limiting is temporarily unavailable. Please try again later.",
+      code: "RATE_LIMIT_UNAVAILABLE",
+    },
+    {
+      status: 503,
+      headers: {
+        "Retry-After": RATE_LIMIT_UNAVAILABLE_RETRY_SECONDS.toString(),
+      },
+    },
+  );
 }
 
 /**

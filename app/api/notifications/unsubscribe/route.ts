@@ -3,6 +3,15 @@ import { kvGet, kvSet, kvKeys, kvSRem, SUB_KEY, PERIOD_KEY } from "../_lib/kv";
 import type { SubscriptionRecord } from "@/app/types/notifications";
 import { logger } from "@/app/utils/logger";
 import { apiError, internalApiError } from "@/app/api/_lib/apiError";
+import {
+  getClientIp,
+  checkRateLimit,
+  rateLimitDenialResponse,
+  UNSUBSCRIBE_IP_LIMIT,
+  UNSUBSCRIBE_IP_WINDOW,
+  UNSUBSCRIBE_TARGET_LIMIT,
+  UNSUBSCRIBE_TARGET_WINDOW,
+} from "../_lib/rateLimit";
 
 const VALID_PERIODS = ["weekly", "monthly", "yearly"] as const;
 
@@ -17,11 +26,41 @@ async function removeFromPeriodIndexes(walletAddress: string) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ipDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:ip:unsubscribe:${getClientIp(request)}`,
+        UNSUBSCRIBE_IP_LIMIT,
+        UNSUBSCRIBE_IP_WINDOW
+      )
+    );
+
+    if (ipDenial) {
+      return ipDenial;
+    }
+
     const body = (await request.json()) as {
       token?: string;
       walletAddress?: string;
       channel?: "push" | "email";
     };
+
+    // Throttled per target as well as per IP: the token path scans every
+    // subscription key, so unrestrained token guessing is also a KV cost
+    // problem, and a wallet must not be unsubscribable by a distributed burst.
+    const target = body.token ?? body.walletAddress ?? "";
+    if (target) {
+      const targetDenial = rateLimitDenialResponse(
+        await checkRateLimit(
+          `ratelimit:target:unsubscribe:${target}`,
+          UNSUBSCRIBE_TARGET_LIMIT,
+          UNSUBSCRIBE_TARGET_WINDOW
+        )
+      );
+
+      if (targetDenial) {
+        return targetDenial;
+      }
+    }
 
     if (body.token) {
       const keys = await kvKeys("notif:sub:*");

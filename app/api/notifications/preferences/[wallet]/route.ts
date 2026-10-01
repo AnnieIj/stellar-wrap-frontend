@@ -14,6 +14,15 @@ import { logger } from "@/app/utils/logger";
 import type { SubscriptionRecord } from "@/app/types/notifications";
 import { apiError, internalApiError } from "@/app/api/_lib/apiError";
 import { verifyWalletChallenge } from "../../_lib/auth";
+import {
+  getClientIp,
+  checkRateLimit,
+  rateLimitDenialResponse,
+  PREFERENCES_IP_LIMIT,
+  PREFERENCES_IP_WINDOW,
+  PREFERENCES_WALLET_LIMIT,
+  PREFERENCES_WALLET_WINDOW,
+} from "../../_lib/rateLimit";
 
 const log = logger.child("api:preferences");
 
@@ -67,6 +76,33 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return apiError("INVALID_WALLET", "Invalid wallet address", 400);
     }
 
+    // Rate-limit by source IP
+    const ipDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:ip:preferences:${getClientIp(request)}`,
+        PREFERENCES_IP_LIMIT,
+        PREFERENCES_IP_WINDOW
+      )
+    );
+
+    if (ipDenial) {
+      return ipDenial;
+    }
+
+    // Rate-limit by target wallet
+    const walletDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:wallet:preferences:${wallet}`,
+        PREFERENCES_WALLET_LIMIT,
+        PREFERENCES_WALLET_WINDOW
+      )
+    );
+
+    if (walletDenial) {
+      return walletDenial;
+    }
+
+    // Authenticate wallet ownership
     const authenticated = await verifyWalletChallenge(request, wallet);
 
     if (!authenticated) {
