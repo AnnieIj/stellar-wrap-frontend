@@ -125,6 +125,126 @@ function difference(a, b) {
   return [...a].filter((key) => !b.has(key)).sort();
 }
 
+/**
+ * Scan the codebase for translation key references.
+ * Looks for patterns like:
+ * - useTranslations("Namespace")
+ * - getTranslations({ namespace: "Namespace" })
+ * - t("key") or t("Namespace.key")
+ * - t.rich("key")
+ */
+function scanCodebaseForUsedKeys() {
+  const usedKeys = new Set();
+  const usedNamespaces = new Set();
+
+  function scanDirectory(dir) {
+    if (!fs.existsSync(dir)) return;
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+
+      // Skip node_modules, .next, etc.
+      if (
+        entry.name === "node_modules" ||
+        entry.name === ".next" ||
+        entry.name === ".git" ||
+        entry.name === "dist" ||
+        entry.name === "coverage"
+      ) {
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        scanDirectory(fullPath);
+      } else if (
+        entry.name.endsWith(".ts") ||
+        entry.name.endsWith(".tsx") ||
+        entry.name.endsWith(".js") ||
+        entry.name.endsWith(".jsx")
+      ) {
+        const content = fs.readFileSync(fullPath, "utf8");
+
+        // Find namespace declarations
+        const namespaceMatches = [
+          ...content.matchAll(/useTranslations\(["']([^"']+)["']\)/g),
+          ...content.matchAll(/getTranslations\([^)]*namespace:\s*["']([^"']+)["']/g),
+        ];
+
+        for (const match of namespaceMatches) {
+          usedNamespaces.add(match[1]);
+        }
+
+        // Find key references - t("key") or t("Namespace.key")
+        const keyMatches = [
+          ...content.matchAll(/\bt\(["']([^"']+)["']\)/g),
+          ...content.matchAll(/\bt\.rich\(["']([^"']+)["']\)/g),
+        ];
+
+        for (const match of keyMatches) {
+          const key = match[1];
+          // If it contains a dot, it's a fully qualified key
+          if (key.includes(".")) {
+            usedKeys.add(key);
+          }
+          // Otherwise, we need context from namespace - mark the leaf key
+          // This is less precise but catches usage
+          else {
+            // Mark this as potentially used under any namespace
+            for (const ns of usedNamespaces) {
+              usedKeys.add(`${ns}.${key}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  scanDirectory(path.join(rootDir, "app"));
+  scanDirectory(path.join(rootDir, "src"));
+  scanDirectory(path.join(rootDir, "components"));
+
+  return { usedKeys, usedNamespaces };
+}
+
+/**
+ * Check for dead keys - keys in catalogs that are never referenced in code.
+ */
+function checkForDeadKeys(catalogKeys, usedKeys, usedNamespaces) {
+  const deadKeys = [];
+  const potentiallyDead = [];
+
+  for (const key of catalogKeys) {
+    // Direct match
+    if (usedKeys.has(key)) {
+      continue;
+    }
+
+    // Check if the namespace is used (conservative - don't flag as dead if namespace is used)
+    const namespace = key.split(".")[0];
+    if (usedNamespaces.has(namespace)) {
+      // Namespace is used, but we can't confirm this specific key is used
+      // This is a potential false positive, so we'll be conservative
+      continue;
+    }
+
+    // Check for partial matches (e.g., t(`archetypes.${variable}`) won't be caught by direct match)
+    const hasPartialMatch = Array.from(usedKeys).some((usedKey) => {
+      return usedKey.startsWith(key.split(".")[0] + ".");
+    });
+
+    if (hasPartialMatch) {
+      continue;
+    }
+
+    // Likely dead key
+    potentiallyDead.push(key);
+  }
+
+  return { deadKeys, potentiallyDead };
+}
+
 function main() {
   let locales;
   let defaultLocale;
@@ -190,6 +310,35 @@ function main() {
         log(`      + ${key}`, colors.yellow);
       }
     }
+  }
+
+  // Check for unused keys
+  log("");
+  log("Scanning codebase for unused translation keys...", colors.blue);
+  const { usedKeys, usedNamespaces } = scanCodebaseForUsedKeys();
+  log(`Found ${usedKeys.size} key references in code`, colors.dim);
+  log(`Found ${usedNamespaces.size} namespace declarations`, colors.dim);
+
+  const { deadKeys, potentiallyDead } = checkForDeadKeys(baseKeys, usedKeys, usedNamespaces);
+
+  if (potentiallyDead.length > 0) {
+    log("");
+    log(`Potentially unused keys in ${defaultLocale}.json:`, colors.yellow);
+    log(
+      `  (These keys exist in catalogs but were not found in code scans)`,
+      colors.dim
+    );
+    for (const key of potentiallyDead) {
+      log(`    ? ${key}`, colors.yellow);
+    }
+    log("");
+    log(
+      `Note: This check may have false positives for dynamically constructed keys.`,
+      colors.dim
+    );
+    log(`Review these keys manually to confirm they are truly unused.`, colors.dim);
+  } else {
+    log(`  No obviously unused keys detected`, colors.green);
   }
 
   log("");
