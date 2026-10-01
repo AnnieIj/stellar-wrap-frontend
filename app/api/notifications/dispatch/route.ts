@@ -149,10 +149,10 @@ export async function POST(request: NextRequest) {
     // Fetch subscribers from the period index for each active period
     for (const period of activePeriods) {
       const periodKey = getPeriodKey(period, now);
-      
+
       // Get all wallets subscribed to this period from the index
       const wallets = await getWalletsForPeriod(period);
-      
+
       log.info(`Period ${period}: found ${wallets.length} subscribers in index`);
 
       for (const walletAddress of wallets) {
@@ -167,12 +167,14 @@ export async function POST(request: NextRequest) {
           if (!existing) {
             let status: "sent" | "failed" = "sent";
             let attempts = 1;
+            let error: string | undefined;
 
             try {
               await sendPushNotification(record.push.subscription, walletAddress, period);
-            } catch {
+            } catch (err) {
               status = "failed";
               attempts = 4; // 1 initial + 3 retries
+              error = err instanceof Error ? err.message : String(err);
             }
 
             const logEntry: DispatchLogEntry = {
@@ -183,6 +185,7 @@ export async function POST(request: NextRequest) {
               sentAt: new Date().toISOString(),
               status,
               attempts,
+              ...(error && { error }),
             };
             await kvSet(logKey, logEntry);
             if (status === "sent") dispatched++;
@@ -201,6 +204,7 @@ export async function POST(request: NextRequest) {
           if (!existing) {
             let status: "sent" | "failed" = "sent";
             let attempts = 1;
+            let error: string | undefined;
 
             try {
               await sendEmailNotification(
@@ -208,9 +212,10 @@ export async function POST(request: NextRequest) {
                 record.email.unsubscribeToken,
                 period
               );
-            } catch {
+            } catch (err) {
               status = "failed";
               attempts = 4;
+              error = err instanceof Error ? err.message : String(err);
             }
 
             const logEntry: DispatchLogEntry = {
@@ -221,6 +226,7 @@ export async function POST(request: NextRequest) {
               sentAt: new Date().toISOString(),
               status,
               attempts,
+              ...(error && { error }),
             };
             await kvSet(logKey, logEntry);
             if (status === "sent") dispatched++;
@@ -231,11 +237,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ 
-      ok: true, 
-      dispatched, 
+    return NextResponse.json({
+      ok: true,
+      dispatched,
       periods: activePeriods,
-      uniqueWallets: dispatchedWallets.size 
+      uniqueWallets: dispatchedWallets.size,
     });
   } catch (err) {
     return internalApiError(log, err);
