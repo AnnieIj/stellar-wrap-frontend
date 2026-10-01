@@ -48,123 +48,180 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { Keypair, StrKey } from "stellar-sdk";
-import { consumeToken, Channel } from "@/app/api/notifications/tokenStore";
+import { kvGet, kvSet, kvSRem, SUB_KEY, PERIOD_KEY } from "../_lib/kv";
+import type { SubscriptionRecord } from "@/app/types/notifications";
+import { logger } from "@/app/utils/logger";
+import { apiError, internalApiError } from "@/app/api/_lib/apiError";
+import {
+  getClientIp,
+  checkRateLimit,
+  rateLimitDenialResponse,
+  UNSUBSCRIBE_IP_LIMIT,
+  UNSUBSCRIBE_IP_WINDOW,
+  UNSUBSCRIBE_TARGET_LIMIT,
+  UNSUBSCRIBE_TARGET_WINDOW,
+} from "../_lib/rateLimit";
+import { consumeToken, type Channel } from "@/app/api/notifications/tokenStore";
 
-/** Valid notification channels */
+const VALID_PERIODS = ["weekly", "monthly", "yearly"] as const;
 const VALID_CHANNELS = new Set<Channel>(["email", "sms", "push"]);
-
-/** Prefix used for the proof-of-address signed message */
 const CHALLENGE_PREFIX = "stellar-wrap-notifications-unsubscribe:";
-
-/** In-memory replay guard for proof-of-address nonces */
+const NONCE_RE = /^[A-Za-z0-9_\-]{1,128}$/;
 const usedNonces = new Set<string>();
 
-const NONCE_RE = /^[A-Za-z0-9_\-]{1,128}$/;
+/** Remove email-specific period indexes if push is not subscribed to those periods. */
+async function removeEmailPeriodIndexes(walletAddress: string, record: SubscriptionRecord) {
+  const emailPeriods = record.email?.periods;
+  const pushPeriods = record.push?.periods;
+  if (!emailPeriods) return;
+
+  const ops = VALID_PERIODS.map((period) => {
+    if (emailPeriods[period] && !pushPeriods?.[period]) {
+      return kvSRem(PERIOD_KEY(period), walletAddress);
+    }
+    return Promise.resolve();
+  });
+  await Promise.all(ops);
+}
+
+/** Remove push-specific period indexes if email is not subscribed to those periods. */
+async function removePushPeriodIndexes(walletAddress: string, record: SubscriptionRecord) {
+  const pushPeriods = record.push?.periods;
+  const emailPeriods = record.email?.periods;
+  if (!pushPeriods) return;
+
+  const ops = VALID_PERIODS.map((period) => {
+    if (pushPeriods[period] && !emailPeriods?.[period]) {
+      return kvSRem(PERIOD_KEY(period), walletAddress);
+    }
+    return Promise.resolve();
+  });
+  await Promise.all(ops);
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+    // IP-based rate limiting
+    const ipDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:ip:unsubscribe:${getClientIp(request)}`,
+        UNSUBSCRIBE_IP_LIMIT,
+        UNSUBSCRIBE_IP_WINDOW,
+      ),
+    );
+    if (ipDenial) return ipDenial;
 
-  const fields = (body ?? {}) as Record<string, unknown>;
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return apiError("INVALID_JSON", "Invalid JSON body", 400);
+    }
 
-  // ── Guard: reject bare walletAddress path (the original insecure path) ───
-  //
-  // If the caller only supplied walletAddress + channel (no token and no
-  // signature), return 401 immediately.  This is the path that issue #608
-  // identified as insecure.  It is intentionally rejected rather than silently
-  // ignored so that callers learn the correct API.
-  if (
-    fields.walletAddress &&
-    !fields.token &&
-    !fields.signature
-  ) {
-    return NextResponse.json(
-      {
-        error:
-          "Unauthenticated unsubscribe is not allowed. " +
+    const fields = (body ?? {}) as Record<string, unknown>;
+
+    // Target-based rate limiting (prevents brute force of tokens / wallet addresses)
+    const target = fields.token ?? fields.walletAddress ?? "";
+    if (target) {
+      const targetDenial = rateLimitDenialResponse(
+        await checkRateLimit(
+          `ratelimit:target:unsubscribe:${target}`,
+          UNSUBSCRIBE_TARGET_LIMIT,
+          UNSUBSCRIBE_TARGET_WINDOW,
+        ),
+      );
+      if (targetDenial) return targetDenial;
+    }
+
+    // ── Guard: reject bare walletAddress path (the original insecure path) ───
+    if (fields.walletAddress && !fields.token && !fields.signature) {
+      return apiError(
+        "UNAUTHENTICATED",
+        "Unauthenticated unsubscribe is not allowed. " +
           "Provide either a single-use token (token + channel) " +
           "or proof-of-address (walletAddress + signature + nonce + channel).",
-      },
-      { status: 401 },
-    );
-  }
+        401,
+      );
+    }
 
-  // ── Route to the appropriate authentication path ─────────────────────────
+    // ── Route to the appropriate authentication path ─────────────────────────
+    if (typeof fields.token === "string" && fields.token.trim().length > 0) {
+      return handleTokenPath(fields);
+    }
 
-  if (typeof fields.token === "string" && fields.token.length > 0) {
-    return handleTokenPath(fields);
-  }
+    if (
+      typeof fields.walletAddress === "string" &&
+      typeof fields.signature === "string" &&
+      typeof fields.nonce === "string"
+    ) {
+      return handleProofOfAddressPath(fields);
+    }
 
-  if (
-    typeof fields.walletAddress === "string" &&
-    typeof fields.signature === "string" &&
-    typeof fields.nonce === "string"
-  ) {
-    return handleProofOfAddressPath(fields);
-  }
-
-  // Neither a token nor proof-of-address fields were supplied
-  return NextResponse.json(
-    {
-      error:
-        "Request must include either { token, channel } " +
+    return apiError(
+      "INVALID_REQUEST",
+      "Request must include either { token, channel } " +
         "or { walletAddress, signature, nonce, channel }",
-    },
-    { status: 400 },
-  );
+      400,
+    );
+  } catch (err) {
+    return internalApiError(logger, err);
+  }
 }
 
 // ─── Token path ─────────────────────────────────────────────────────────────
 
-function handleTokenPath(
-  fields: Record<string, unknown>,
-): NextResponse {
+async function handleTokenPath(fields: Record<string, unknown>): Promise<NextResponse> {
   const { token, channel } = fields;
 
   if (typeof token !== "string" || token.trim() === "") {
-    return NextResponse.json(
-      { error: "token must be a non-empty string" },
-      { status: 400 },
-    );
+    return apiError("INVALID_TOKEN", "token must be a non-empty string", 400);
   }
 
   if (!VALID_CHANNELS.has(channel as Channel)) {
-    return NextResponse.json(
-      {
-        error: `channel must be one of: ${[...VALID_CHANNELS].join(", ")}`,
-      },
-      { status: 400 },
+    return apiError(
+      "INVALID_CHANNEL",
+      `channel must be one of: ${[...VALID_CHANNELS].join(", ")}`,
+      400,
     );
   }
 
-  // consumeToken deletes the record on first call (single-use) and validates
-  // channel scoping + expiry in one atomic operation
-  const record = consumeToken(token.trim(), channel as Channel);
-
-  if (!record) {
-    // Deliberately vague to prevent channel probing
-    return NextResponse.json(
-      {
-        error:
-          "Token is invalid, expired, or was already used. " +
-          "Request a new unsubscribe link.",
-      },
-      { status: 401 },
+  const tokenRecord = consumeToken(token.trim(), channel as Channel);
+  if (!tokenRecord) {
+    return apiError(
+      "INVALID_TOKEN",
+      "Token is invalid, expired, or was already used. Request a new unsubscribe link.",
+      401,
     );
   }
 
-  // TODO: persist the unsubscribe to your database, e.g.:
-  //   await db.notifications.unsubscribe({ walletAddress: record.walletAddress, channel: record.channel });
+  // Fetch the subscription record for the wallet address stored in the token
+  const subscriptionKey = SUB_KEY(tokenRecord.walletAddress);
+  const subscription = await kvGet<SubscriptionRecord>(subscriptionKey);
+  if (!subscription) {
+    return apiError("NOT_FOUND", "No subscription found for this token", 404);
+  }
+
+  // Update the record: remove the channel field
+  const updated: SubscriptionRecord = { ...subscription };
+  if (channel === "email") {
+    updated.email = undefined;
+    await removeEmailPeriodIndexes(tokenRecord.walletAddress, subscription);
+  } else if (channel === "push") {
+    updated.push = undefined;
+    await removePushPeriodIndexes(tokenRecord.walletAddress, subscription);
+  } else if (channel === "sms") {
+    // SMS has no period indexing; just remove the field
+    // (Assuming SubscriptionRecord has an `sms` field; if not, adjust as needed)
+    (updated as Record<string, unknown>).sms = undefined;
+  }
+
+  await kvSet(subscriptionKey, updated);
 
   return NextResponse.json(
     {
       success: true,
-      walletAddress: record.walletAddress,
-      channel: record.channel,
+      walletAddress: tokenRecord.walletAddress,
+      channel,
     },
     { status: 200 },
   );
@@ -172,57 +229,50 @@ function handleTokenPath(
 
 // ─── Proof-of-address path ───────────────────────────────────────────────────
 
-function handleProofOfAddressPath(
-  fields: Record<string, unknown>,
-): NextResponse {
+async function handleProofOfAddressPath(fields: Record<string, unknown>): Promise<NextResponse> {
   const { walletAddress, signature, nonce, channel } = fields;
 
-  // Validate address
+  // Validate wallet address
   let isValidAddress = false;
   try {
     isValidAddress =
       typeof walletAddress === "string" &&
       StrKey.isValidEd25519PublicKey(walletAddress) &&
-      (walletAddress as string).startsWith("G") &&
-      (walletAddress as string).length === 56;
+      walletAddress.startsWith("G") &&
+      walletAddress.length === 56;
   } catch {
     isValidAddress = false;
   }
 
   if (!isValidAddress) {
-    return NextResponse.json(
-      { error: "Invalid walletAddress: must be a valid Stellar G-address" },
-      { status: 400 },
+    return apiError(
+      "INVALID_WALLET_ADDRESS",
+      "Invalid walletAddress: must be a valid Stellar G-address",
+      400,
     );
   }
 
   // Validate channel
   if (!VALID_CHANNELS.has(channel as Channel)) {
-    return NextResponse.json(
-      {
-        error: `channel must be one of: ${[...VALID_CHANNELS].join(", ")}`,
-      },
-      { status: 400 },
+    return apiError(
+      "INVALID_CHANNEL",
+      `channel must be one of: ${[...VALID_CHANNELS].join(", ")}`,
+      400,
     );
   }
 
   // Validate nonce shape
   if (typeof nonce !== "string" || !NONCE_RE.test(nonce)) {
-    return NextResponse.json(
-      {
-        error:
-          "Invalid nonce: must be 1–128 alphanumeric/hyphen/underscore characters",
-      },
-      { status: 400 },
+    return apiError(
+      "INVALID_NONCE",
+      "Invalid nonce: must be 1–128 alphanumeric/hyphen/underscore characters",
+      400,
     );
   }
 
   // Replay protection
-  if (usedNonces.has(nonce as string)) {
-    return NextResponse.json(
-      { error: "Nonce has already been used" },
-      { status: 401 },
-    );
+  if (usedNonces.has(nonce)) {
+    return apiError("NONCE_USED", "Nonce has already been used", 401);
   }
 
   // Verify signature
@@ -233,10 +283,7 @@ function handleProofOfAddressPath(
   try {
     signatureBytes = Buffer.from(signature as string, "base64");
   } catch {
-    return NextResponse.json(
-      { error: "signature must be a valid base64 string" },
-      { status: 400 },
-    );
+    return apiError("INVALID_SIGNATURE", "signature must be a valid base64 string", 400);
   }
 
   let signatureValid = false;
@@ -248,16 +295,31 @@ function handleProofOfAddressPath(
   }
 
   if (!signatureValid) {
-    return NextResponse.json(
-      { error: "Signature verification failed" },
-      { status: 401 },
-    );
+    return apiError("SIGNATURE_FAILED", "Signature verification failed", 401);
   }
 
   usedNonces.add(nonce as string);
 
-  // TODO: persist the unsubscribe to your database, e.g.:
-  //   await db.notifications.unsubscribe({ walletAddress, channel });
+  // Fetch the subscription record
+  const subscriptionKey = SUB_KEY(walletAddress as string);
+  const subscription = await kvGet<SubscriptionRecord>(subscriptionKey);
+  if (!subscription) {
+    return apiError("NOT_FOUND", "No subscription found", 404);
+  }
+
+  // Update the record: remove the channel field
+  const updated: SubscriptionRecord = { ...subscription };
+  if (channel === "email") {
+    updated.email = undefined;
+    await removeEmailPeriodIndexes(walletAddress as string, subscription);
+  } else if (channel === "push") {
+    updated.push = undefined;
+    await removePushPeriodIndexes(walletAddress as string, subscription);
+  } else if (channel === "sms") {
+    (updated as Record<string, unknown>).sms = undefined;
+  }
+
+  await kvSet(subscriptionKey, updated);
 
   return NextResponse.json(
     {

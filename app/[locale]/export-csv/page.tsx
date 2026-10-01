@@ -27,6 +27,7 @@ import {
   exportToCsv,
 } from "@/src/utils/csvExport";
 import { ProgressIndicator } from "@/app/components/ProgressIndicator";
+import { ExportCsvSkeleton } from "@/app/components/ExportCsvSkeleton";
 import type { WrapResult } from "@/app/store/wrapStore";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -237,6 +238,13 @@ export default function ExportCsvPage() {
   const retryDisabled = Date.now() < retryDisabledUntil;
 
   // ─── Render ─────────────────────────────────────────────────────────────────
+
+  // Show the full-page skeleton while the wallet connection is being checked
+  // so the user never sees a blank screen (prevents CLS).
+  if (connectionState === "checking") {
+    return <ExportCsvSkeleton />;
+  }
+
   return (
     <main
       className="min-h-screen bg-[var(--background)] text-[var(--foreground)]"
@@ -294,17 +302,6 @@ export default function ExportCsvPage() {
                 </p>
               </div>
             </motion.div>
-          )}
-
-          {/* Checking existing connection */}
-          {connectionState === "checking" && (
-            <div
-              className="flex items-center gap-3 text-slate-400 text-sm"
-              aria-live="polite"
-            >
-              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              Checking wallet status…
-            </div>
           )}
 
           {/* Not installed */}

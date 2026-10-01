@@ -8,6 +8,13 @@ import { indexAccount } from "@/app/services/indexerServer";
 import { WrapPeriod, PERIODS } from "@/app/utils/indexer";
 import { validateStellarAddress } from "@/src/utils/validateStellarAddress";
 import { logger } from "@/app/utils/logger";
+import {
+  getRateLimitConfig,
+  getClientIp,
+  checkRateLimit,
+  rateLimitResponse,
+} from "@/app/api/_lib/rateLimit";
+import type { Network } from "@/src/config";
 
 const log = logger.child("api:wrapped");
 
@@ -117,11 +124,19 @@ export async function GET(request: NextRequest) {
     // Server-safe indexer (no IndexedDB) — returns live Horizon data
     const response = await indexAccount(accountId, network, period);
 
+    // `cached`, `cacheTimestamp` and `refreshingInBackground` are required by
+    // the schema in openapi.yaml, so they are always emitted even though the
+    // stateless server path never serves from a cache itself. Passing
+    // `undefined` through dropped the keys from the JSON entirely, which made
+    // the response violate its own schema.
     return NextResponse.json({
       ...response.result,
       cached: response.fromCache,
-      cacheTimestamp: response.cacheTimestamp,
-      refreshingInBackground: response.refreshingInBackground,
+      cacheTimestamp:
+        response.cacheTimestamp != null
+          ? new Date(response.cacheTimestamp).toISOString()
+          : null,
+      refreshingInBackground: response.refreshingInBackground ?? false,
     });
   } catch (error: unknown) {
     // Detailed errors stay server-side only — never leak to clients

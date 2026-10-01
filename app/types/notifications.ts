@@ -75,6 +75,8 @@ export interface DispatchLogEntry {
   sentAt: string; // ISO-8601
   status: "sent" | "failed";
   attempts: number;
+  /** Error message from the final failed attempt (only present if status === "failed") */
+  error?: string;
 }
 
 // ─── Notification preferences (Zustand store shape) ──────────────────────────
