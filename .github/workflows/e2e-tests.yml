@@ -49,6 +49,14 @@ jobs:
         env:
           CI: "true"
 
+      - name: Run Transaction Signing E2E flow
+        # Issue #417: dedicated run of the Transaction Signing journey so the
+        # wallet interaction, Stroop amount formatting, latency/timeout handling
+        # and signature-rejection error paths are exercised explicitly.
+        run: pnpm exec playwright test tests/e2e/transaction-signing.spec.ts
+        env:
+          CI: "true"
+
       - name: Upload Playwright report & traces
         uses: actions/upload-artifact@v4
         if: always()

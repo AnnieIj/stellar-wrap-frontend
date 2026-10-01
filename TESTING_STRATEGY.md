@@ -69,6 +69,10 @@ pnpm test:coverage  # Jest coverage
 # Visual tests
 pnpm test:visual
 pnpm test:visual:update  # Update snapshots
+
+# E2E tests (Playwright)
+pnpm test:e2e
+pnpm test:e2e:ui
 ```
 
 ## Configuration Files
@@ -146,6 +150,45 @@ describe('MyService Comprehensive Tests', () => {
 });
 ```
 
+### Playwright E2E Test Example
+
+```typescript
+// e2e/transaction-signing.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Transaction Signing flow', () => {
+  test('signs a transaction end to end', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Connect Wallet' }).click();
+    await page.getByRole('button', { name: 'Sign Transaction' }).click();
+    await expect(page.getByText('Transaction signed')).toBeVisible();
+  });
+});
+```
+
+## Transaction Signing E2E Tests
+
+The `Transaction Signing` user journey is critical and covered by Playwright E2E tests in `e2e/transaction-signing.spec.ts`. These tests simulate a user going through the flow from start to finish and must satisfy the following acceptance criteria:
+
+- **Wallet interaction**: Connect and interact gracefully with the target Web3 wallet (e.g., Freighter). Wallet APIs are stubbed via `page.addInitScript` so the flow is deterministic and does not depend on a real extension.
+- **Stellar amount formatting**: Verify correct parsing and formatting of Stellar amounts, including 7 decimal precision and Stroops conversion (e.g., `1.0000000` XLM ↔ `10000000` Stroops).
+- **Network latency & timeouts**: Simulate slow RPC responses and connection timeouts to confirm the UI degrades gracefully without crashing.
+- **Rejected signature**: Assert a clear error message is displayed when the user rejects the transaction signature.
+- **RPC optimization**: Assert that RPC calls are deduplicated/cached so repeated renders do not trigger redundant requests that could cause rate-limiting.
+
+### Running the Transaction Signing E2E Tests
+
+```bash
+# Run the full E2E suite
+pnpm test:e2e
+
+# Run only the Transaction Signing flow
+pnpm test:e2e -- e2e/transaction-signing.spec.ts
+
+# Debug interactively
+pnpm test:e2e:ui
+```
+
 ## Migration Guide
 
 ### Moving a Test from Jest to Vitest
@@ -178,6 +221,7 @@ describe('MyService Comprehensive Tests', () => {
 Check the file naming:
 - Jest: Must end with `.test.ts` or `.test.tsx`
 - Vitest: Must end with `.comprehensive.test.ts`, `.edge.test.ts`, or `.integration.test.ts`
+- Playwright: Must end with `.spec.ts`
 
 ### Import errors?
 
