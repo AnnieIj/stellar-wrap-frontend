@@ -8,7 +8,7 @@
 
 import { EventEmitter } from "events";
 import { IndexingStep, IndexingMetrics } from "@/app/types/indexing";
-import { useIndexingStore } from "@/app/store/indexingStore";
+import { useWrapStore } from "@/app/store/wrapStore";
 
 /**
  * Event types emitted by the indexer service
@@ -96,35 +96,50 @@ export class IndexerEventEmitter extends EventEmitter {
 
   /**
    * Connect emitter to Zustand store (call once during app initialization)
-   * Safe to call multiple times - will only connect once
+   * Safe to call multiple times - will only connect once per session.
+   * Call {@link reset} between loading sessions so listeners are not duplicated.
    */
   connectToStore(): void {
-    // Prevent duplicate listener registration
+    // Prevent duplicate listener registration across repeated sessions
     if (this.isConnected) {
       return;
     }
 
-    const store = useIndexingStore;
+    const store = useWrapStore;
 
-    this.on("step-change", ({ step }) => {
+    // EventEmitter's own .on() listener signature is untyped
+    // ((...args: any[]) => void), so each callback here is explicitly
+    // typed against the matching IndexerEvent member — otherwise the
+    // destructured `step` etc. below is implicitly `any`.
+    this.on("step-change", ({ step }: Extract<IndexerEvent, { type: "step-change" }>) => {
       store.getState().setCurrentStep(step);
     });
 
-    this.on("step-progress", ({ step, progress }) => {
-      store.getState().setStepProgress(step, progress);
-    });
+    this.on(
+      "step-progress",
+      ({ step, progress }: Extract<IndexerEvent, { type: "step-progress" }>) => {
+        const state = store.getState();
+        // Drop late events after step completion (defense in depth; store also clamps)
+        if (state.completedStepRecord[step]) {
+          return;
+        }
+        store.getState().setStepProgress(step, progress);
+      },
+    );
 
-    this.on("step-complete", ({ step }) => {
+    this.on("step-complete", ({ step }: Extract<IndexerEvent, { type: "step-complete" }>) => {
       store.getState().completeStep(step);
     });
 
-    this.on("step-error", ({ step, message, recoverable }) => {
-      store.getState().setError(step, message, recoverable);
-    });
+    this.on(
+      "step-error",
+      ({ step, message, recoverable }: Extract<IndexerEvent, { type: "step-error" }>) => {
+        store.getState().setIndexingError(step, message, recoverable);
+      },
+    );
 
-    this.on("indexing-complete", ({ _data }) => {
-      // Clear persisted state on successful completion
-      store.getState().clearPersistedState();
+    this.on("indexing-complete", () => {
+      store.getState().clearPersistedIndexingState();
     });
 
     this.on("indexing-cancelled", () => {
@@ -132,6 +147,13 @@ export class IndexerEventEmitter extends EventEmitter {
     });
 
     this.isConnected = true;
+  }
+
+  /**
+   * Whether store listeners are currently attached.
+   */
+  isStoreConnected(): boolean {
+    return this.isConnected;
   }
 
   /**
@@ -143,7 +165,8 @@ export class IndexerEventEmitter extends EventEmitter {
   }
 
   /**
-   * Remove all listeners and reset connection (cleanup)
+   * Remove all listeners and reset connection so the next session can
+   * safely call {@link connectToStore} without duplicate store updates.
    */
   reset(): void {
     this.removeAllListeners();

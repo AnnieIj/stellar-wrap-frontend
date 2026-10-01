@@ -21,28 +21,52 @@ interface WrapResult {
     dapps: DappData[]; vibes: VibeSlice[]; persona: string; personaDescription: string;
 }
 
+interface CacheMeta {
+    fromCache: boolean;
+    cacheTimestamp?: number;
+    refreshingInBackground?: boolean;
+    offline?: boolean;
+}
+
 interface WrapStoreState {
     address: string | null; period: WrapPeriod; network: Network;
     status: WrapStatus; error: string | null; result: WrapResult | null;
+    cacheMeta: CacheMeta | null;
+    currentContractAddress: string | null;
     setAddress: (address: string | null) => void;
     setPeriod: (period: WrapPeriod) => void;
     setNetwork: (network: Network) => void;
     setStatus: (status: WrapStatus) => void;
     setError: (error: string | null) => void;
     setResult: (result: WrapResult | null) => void;
+    setCacheMeta: (meta: CacheMeta | null) => void;
     reset: () => void;
 }
 
 const useWrapStore = create<WrapStoreState>((set) => ({
     address: null, period: 'yearly', network: 'mainnet' as Network,
-    status: 'idle', error: null, result: null,
+    status: 'idle', error: null, result: null, cacheMeta: null,
+    currentContractAddress: null,
     setAddress: (address) => set({ address }),
     setPeriod: (period) => set({ period }),
-    setNetwork: (network) => set({ network }),
+    setNetwork: (network) => {
+        const newContractAddress = network === 'mainnet'
+            ? 'CMainnetTBD5EJXJ5CBN5XJXJXJXJXJXJXJXJXJXJXJXJXJXJX'
+            : 'CTestnetTBD5EJXJ5CBN5XJXJXJXJXJXJXJXJXJXJXJXJXJXJXJXJX';
+        set({
+            network,
+            currentContractAddress: newContractAddress,
+            result: null,
+            cacheMeta: null,
+            status: 'idle',
+            error: null,
+        });
+    },
     setStatus: (status) => set({ status }),
     setError: (error) => set({ error }),
     setResult: (result) => set({ result }),
-    reset: () => set({ address: null, period: 'yearly', network: 'mainnet' as Network, status: 'idle', error: null, result: null }),
+    setCacheMeta: (cacheMeta) => set({ cacheMeta }),
+    reset: () => set({ address: null, period: 'yearly', network: 'mainnet' as Network, status: 'idle', error: null, result: null, cacheMeta: null }),
 }));
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────
@@ -67,6 +91,9 @@ const mockResult: WrapResult = {
     vibes: [{ type: 'defi', percentage: 80, color: '#FF0000', label: 'DeFi Lord' }],
     persona: 'The Trader', personaDescription: 'You live for the swap.',
 };
+
+const MAINNET_CONTRACT_ADDRESS = 'CMainnetTBD5EJXJ5CBN5XJXJXJXJXJXJXJXJXJXJXJXJXJXJX';
+const TESTNET_CONTRACT_ADDRESS = 'CTestnetTBD5EJXJ5CBN5XJXJXJXJXJXJXJXJXJXJXJXJXJXJXJXJX';
 
 // ─── Initial State ──────────────────────────────────────────────────────────
 
@@ -115,6 +142,115 @@ section('setNetwork');
 
     useWrapStore.getState().setNetwork('mainnet');
     assert(useWrapStore.getState().network === 'mainnet', 'setNetwork back to mainnet');
+}
+
+// ─── setNetwork clears network-sensitive state ──────────────────────────────
+
+section('setNetwork clears result and cache metadata');
+{
+    useWrapStore.getState().setAddress('GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7');
+    useWrapStore.getState().setPeriod('weekly');
+    useWrapStore.getState().setNetwork('mainnet');
+    useWrapStore.getState().setStatus('ready');
+    useWrapStore.getState().setResult(mockResult);
+    useWrapStore.getState().setCacheMeta({ fromCache: true, cacheTimestamp: Date.now() });
+    useWrapStore.getState().setError('stale network error');
+
+    useWrapStore.getState().setNetwork('testnet');
+    const state = useWrapStore.getState();
+
+    assert(state.network === 'testnet', 'network switched to testnet');
+    assert(state.result === null, 'result cleared on network change');
+    assert(state.cacheMeta === null, 'cacheMeta cleared on network change');
+    assert(state.status === 'idle', 'status reset to idle on network change');
+    assert(state.error === null, 'error cleared on network change');
+    assert(state.period === 'weekly', 'period preference preserved on network change');
+    assert(
+        state.address === 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7',
+        'address preference preserved on network change',
+    );
+}
+
+section('Network Switching');
+
+console.log('  ▸ Mainnet to testnet - contract address refresh and state clear');
+{
+    useWrapStore.getState().setAddress('GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7');
+    useWrapStore.getState().setPeriod('yearly');
+    useWrapStore.getState().setNetwork('mainnet');
+    useWrapStore.getState().setStatus('ready');
+    useWrapStore.getState().setResult(mockResult);
+    useWrapStore.getState().setCacheMeta({ fromCache: true, cacheTimestamp: Date.now() });
+    useWrapStore.getState().setError('some error');
+
+    const stateBefore = useWrapStore.getState();
+    assert(
+        stateBefore.currentContractAddress === MAINNET_CONTRACT_ADDRESS,
+        'currentContractAddress is mainnet address',
+    );
+    assert(stateBefore.network === 'mainnet', 'network is mainnet');
+    assert(stateBefore.result !== null, 'result is set before switch');
+    assert(stateBefore.cacheMeta !== null, 'cacheMeta is set before switch');
+    assert(stateBefore.status === 'ready', 'status is ready before switch');
+    assert(stateBefore.error === 'some error', 'error is set before switch');
+
+    useWrapStore.getState().setNetwork('testnet');
+    const stateAfter = useWrapStore.getState();
+
+    assert(stateAfter.network === 'testnet', 'network switched to testnet');
+    assert(
+        stateAfter.currentContractAddress === TESTNET_CONTRACT_ADDRESS,
+        'currentContractAddress updated to testnet address',
+    );
+    assert(stateAfter.result === null, 'result cleared on network change');
+    assert(stateAfter.cacheMeta === null, 'cacheMeta cleared on network change');
+    assert(stateAfter.status === 'idle', 'status reset to idle on network change');
+    assert(stateAfter.error === null, 'error cleared on network change');
+    assert(stateAfter.period === 'yearly', 'period preserved on network change');
+    assert(
+        stateAfter.address === 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7',
+        'address preserved on network change',
+    );
+}
+
+console.log('  ▸ Testnet to mainnet - contract address refresh and state clear');
+{
+    useWrapStore.getState().setAddress('GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7');
+    useWrapStore.getState().setPeriod('weekly');
+    useWrapStore.getState().setNetwork('testnet');
+    useWrapStore.getState().setStatus('ready');
+    useWrapStore.getState().setResult(mockResult);
+    useWrapStore.getState().setCacheMeta({ fromCache: true, cacheTimestamp: Date.now() });
+    useWrapStore.getState().setError('some error');
+
+    const stateBefore = useWrapStore.getState();
+    assert(
+        stateBefore.currentContractAddress === TESTNET_CONTRACT_ADDRESS,
+        'currentContractAddress is testnet address',
+    );
+    assert(stateBefore.network === 'testnet', 'network is testnet');
+    assert(stateBefore.result !== null, 'result is set before switch');
+    assert(stateBefore.cacheMeta !== null, 'cacheMeta is set before switch');
+    assert(stateBefore.status === 'ready', 'status is ready before switch');
+    assert(stateBefore.error === 'some error', 'error is set before switch');
+
+    useWrapStore.getState().setNetwork('mainnet');
+    const stateAfter = useWrapStore.getState();
+
+    assert(stateAfter.network === 'mainnet', 'network switched to mainnet');
+    assert(
+        stateAfter.currentContractAddress === MAINNET_CONTRACT_ADDRESS,
+        'currentContractAddress updated to mainnet address',
+    );
+    assert(stateAfter.result === null, 'result cleared on network change');
+    assert(stateAfter.cacheMeta === null, 'cacheMeta cleared on network change');
+    assert(stateAfter.status === 'idle', 'status reset to idle on network change');
+    assert(stateAfter.error === null, 'error cleared on network change');
+    assert(stateAfter.period === 'weekly', 'period preserved on network change');
+    assert(
+        stateAfter.address === 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7',
+        'address preserved on network change',
+    );
 }
 
 // ─── setStatus ──────────────────────────────────────────────────────────────

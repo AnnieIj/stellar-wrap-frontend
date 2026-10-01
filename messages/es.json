@@ -1,0 +1,80 @@
+{
+  "LandingPage": {
+    "title": "Bienvenido a Stellar Wrap",
+    "subtitle": "Tu resumen del año en la red Stellar"
+  },
+  "Navbar": {
+    "disconnect": "Desconectar"
+  },
+  "Landing": {
+    "tagline": "Tu historia blockchain contada como nunca antes."
+  },
+  "SharePage": {
+    "title": "Stellar Wrapped 2026",
+    "shareText": "¡Mira mi Stellar Wrapped 2026! ¡{transactions} transacciones, personalidad {persona}, {vibePercentage}% {topVibe}! 🎉 #StellarWrapped",
+    "viewHistory": "Ver historial completo en Stellar.expert",
+    "linkCopied": "Enlace copiado al portapapeles",
+    "copyLink": "Copiar enlace al portapapeles",
+    "copied": "¡Copiado!",
+    "closeMenu": "Cerrar menú para compartir",
+    "openMenu": "Abrir menú para compartir"
+  },
+  "ShareCard": {
+    "mintedSuccessfully": "¡Creado con éxito!",
+    "viewTransaction": "Ver tu transacción en Stellar Explorer",
+    "view": "Ver",
+    "mintingFailed": "Error al crear",
+    "starting": "Iniciando...",
+    "gifDownloaded": "GIF descargado",
+    "gifDescription": "Optimizado para Twitter, WhatsApp y Telegram.",
+    "videoDownloaded": "Vídeo descargado",
+    "videoDescription": "MP4/WebM — ideal para Discord e inserciones enriquecidas.",
+    "staticPng": "Se usó un PNG estático",
+    "animationExportFailed": "Error al exportar la animación",
+    "imageFallbackCopied": "La exportación de imágenes no es compatible aquí: se copió el enlace a la imagen de tu tarjeta",
+    "imageFallbackOpen": "La exportación de imágenes no es compatible aquí: abre la imagen de tu tarjeta",
+    "openImage": "Abrir imagen",
+    "exportFailed": "Error al exportar",
+    "mintingOffline": "La creación no está disponible sin conexión",
+    "connectWalletFirst": "Conecta tu cartera primero",
+    "connectWallet": "Conectar cartera",
+    "transactionSimulationSuccessful": "Simulación de transacción exitosa",
+    "estimatedFee": "Comisión estimada: {fee} XLM",
+    "buildingTransaction": "Creando transacción...",
+    "simulatingTransaction": "Simulando transacción...",
+    "awaitingSignature": "Esperando la firma de la cartera...",
+    "confirmingAttempt": "Confirmando… intento {attempt} / 60",
+    "submittingTransaction": "Enviando transacción...",
+    "confirmingTransaction": "Confirmando transacción...",
+    "minted": "¡Creado!",
+    "retryMint": "Reintentar",
+    "mintWrap": "Crear mi Wrap",
+    "mintUnavailableOffline": "No disponible sin conexión",
+    "stellarWrapped": "STELLAR WRAPPED 2026",
+    "totalTransactions": "Transacciones totales",
+    "persona": "Personalidad",
+    "topVibe": "Vibra principal",
+    "shareYourWrap": "COMPARTE / TU WRAP",
+    "square": "Cuadrado",
+    "stories": "Historias",
+    "shareToSocial": "Compartir en redes",
+    "postToX": "Publicar en X",
+    "downloadGif": "Descargar como GIF",
+    "downloadVideo": "Descargar como vídeo",
+    "encodingGif": "Codificando GIF...",
+    "recording": "Grabando...",
+    "generatingCard": "Generando tu tarjeta...",
+    "downloadImage": "Descargar imagen",
+    "showJourney": "Muestra al mundo tu historia en Stellar",
+    "scanToView": "ESCANEA PARA VER",
+    "scanToViewAlt": "Escanear para ver",
+    "noVibeData": "Sin datos de vibra",
+    "downloadPng": "Descargar PNG",
+    "downloading": "Descargando..."
+  },
+  "Og": {
+    "title": "El Stellar Wrap de {username}",
+    "description": "Mira este resumen del año en la blockchain de Stellar — transacciones, personalidad DeFi y vibras.",
+    "shareCardAlt": "Tarjeta para compartir de Stellar Wrap"
+  }
+}

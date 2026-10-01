@@ -12,8 +12,8 @@ export const mockData = {
     },
     {
       name: "Phoenix",
-      color: "#4FACFE",
-      gradient: "linear-gradient(135deg, #4FACFE 0%, #00F2FE 100%)",
+      color: "#4ACFFE",
+      gradient: "linear-gradient(135deg, #4ACFFE 0%, #00F2FE 100%)",
       transactions: 142,
     },
     {
@@ -39,7 +39,7 @@ export const mockData = {
     {
       type: "dev",
       percentage: 10,
-      color: "linear-gradient(135deg, #30CFD0 0%, #330867 100%)",
+      color: "linear-gradient(135deg, #30CF9CD0 0%, #330867 100%)",
       label: "Code Alchemist",
     },
   ],
@@ -47,3 +47,63 @@ export const mockData = {
   personaDescription:
     "Like Gandalf in Middle-earth, you wield DeFi magic with wisdom. The blockchain bends to your will.",
 };
+
+// Mock asset card data for Storybook
+export interface AssetCardMockData {
+  id: string;
+  name: string;
+  symbol: string;
+  balance: number;
+  usdValue: number;
+  changePercent: number;
+  variant: "primary" | "secondary";
+  isLoading: boolean;
+  isDisabled: boolean;
+}
+
+export const mockAssetCards: AssetCardMockData[] = [
+  {
+    id: "eth-primary",
+    name: "Ethereum",
+    symbol: "ETH",
+    balance: 12.5,
+    usdValue: 24123.45,
+    changePercent: 5.23,
+    variant: "primary",
+    isLoading: false,
+    isDisabled: false,
+  },
+  {
+    id: "btc-secondary",
+    name: "Bitcoin",
+    symbol: "BTC",
+    balance: 0.75,
+    usdValue: 28456.78,
+    changePercent: -2.12,
+    variant: "secondary",
+    isLoading: false,
+    isDisabled: false,
+  },
+  {
+    id: "ada-disabled",
+    name: "Cardano",
+    symbol: "ADA",
+    balance: 1200,
+    usdValue: 987.12,
+    changePercent: 0.87,
+    variant: "primary",
+    isLoading: false,
+    isDisabled: true,
+  },
+  {
+    id: "sol-loading",
+    name: "Solana",
+    symbol: "SOL",
+    balance: 45.2,
+    usdValue: 5678.9,
+    changePercent: 12.03,
+    variant: "secondary",
+    isLoading: true,
+    isDisabled: false,
+  },
+];

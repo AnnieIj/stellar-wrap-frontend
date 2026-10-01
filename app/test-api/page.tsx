@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { AssetDisplay } from "@/app/components/AssetDisplay";
+import { formatDappDisplayName } from "@/app/utils/formatDappLabel";
 
 export default function TestAPIPage() {
   type Dapp = {
@@ -197,7 +198,7 @@ export default function TestAPIPage() {
                     <ul className="space-y-1 ml-4">
                       {result.dapps.map((dapp: Dapp) => (
                         <li key={dapp.name}>
-                          • {dapp.name}: {dapp.transactionCount} tx,{" "}
+                          • {formatDappDisplayName(dapp.name)}: {dapp.transactionCount} tx,{" "}
                           {dapp.volume.toFixed(2)} XLM
                         </li>
                       ))}

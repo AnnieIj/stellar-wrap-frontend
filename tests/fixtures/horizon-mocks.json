@@ -1,0 +1,20 @@
+{
+  "validAddress": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+  "invalidAddress": "GINVALIDADDRESS1234567890",
+  "mockResponses": {
+    "accounts": {
+      "balances": [
+        {"asset_type": "native", "balance": "1234.56789"}
+      ],
+      "signers": [{"key": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "weight": 1}],
+      "data": {}
+    },
+    "operations": {
+      "_embedded": {
+        "records": [
+          {"type": "payment", "amount": "100", "asset_type": "native", "created_at": "2025-01-01T00:00:00Z"}
+        ]
+      }
+    }
+  }
+}

@@ -4,6 +4,9 @@ import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { soundManager } from "../utils/soundManager";
 import { useSoundStore } from "../store/soundStore";
+import { logger } from "@/app/utils/logger";
+
+const log = logger.child("SoundManager");
 
 export function SoundManager() {
   const pathname = usePathname();
@@ -27,7 +30,7 @@ export function SoundManager() {
         isInitializingRef.current = true;
         soundManager.startBackgroundMusic()
           .catch((error) => {
-            console.warn("Failed to start background music:", error);
+            log.warn("Failed to start background music:", error);
           })
           .finally(() => {
             isInitializingRef.current = false;

@@ -1,434 +1,156 @@
 /**
- * Stellar Horizon Indexing Service
- * Fetches and processes transaction data from Stellar Horizon API
+ * Browser indexer service — wraps server-safe core with IndexedDB cache.
+ * For API routes, import from `@/app/services/indexerServer` instead.
  */
 
-import { getHorizonServer } from "@/app/utils/stellarClient";
-// Inline types for transaction and operation records
-type OperationRecord = {
-  type: string;
-  amount?: string;
-  asset_code?: string;
-  memo?: string;
-  [key: string]: unknown;
-};
-type TransactionRecord = {
-  created_at: string;
-  memo?: string;
-  operations: OperationRecord[];
-  paging_token?: string;
-  [key: string]: unknown;
-};
 import {
-  IndexerResult,
   IndexerResultWithMeta,
-  PERIODS,
   WrapPeriod,
   getCacheKey,
   isCacheValid,
+  PERIODS,
 } from "@/app/utils/indexer";
 import { getCacheEntry, setCacheEntry } from "@/app/utils/indexedDbCache";
+import { runIndexingCore } from "./indexerCore";
+import { indexerWarn } from "@/app/utils/indexerDebug";
 import { calculateAchievements } from "./achievementCalculator";
-import { IndexerEventEmitter } from "@/app/utils/indexerEventEmitter";
-import { INDEXING_STEPS, IndexingStep } from "@/app/types/indexing";
 
-const MAX_CONCURRENT_REQUESTS = 5;
+/** Ordered from narrowest to widest so we can walk upward for cache hits. */
+const PERIOD_ORDER: WrapPeriod[] = ["weekly", "biweekly", "monthly", "yearly"];
 
-interface QueueItem {
-  cursor?: string;
-  resolve: () => void;
-  reject: () => void;
-}
-
-class ConcurrencyManager {
-  private active = 0;
-  private queue: QueueItem[] = [];
-
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    while (this.active >= MAX_CONCURRENT_REQUESTS) {
-      await new Promise<void>((resolve) => {
-        this.queue.push({
-          resolve: () => resolve(),
-          reject: () => {},
-        });
-      });
-    }
-
-    this.active++;
-    try {
-      return await fn();
-    } finally {
-      this.active--;
-      const next = this.queue.shift();
-      if (next) {
-        next.resolve();
-      }
-    }
-  }
-}
-
-const concurrencyManager = new ConcurrencyManager();
-
-/**
- * Runs `workFn` immediately (so we capture the result), then animates step
- * progress smoothly over `estimatedDuration` ms before marking it complete.
- * When background is true, skips all UI emissions.
- */
-async function animateStep<T>(
-  step: IndexingStep,
-  emitter: IndexerEventEmitter,
-  workFn: () => T | Promise<T>,
-  background: boolean,
-): Promise<T> {
-  const result = await workFn();
-  if (background) return result;
-
-  const duration = INDEXING_STEPS[step].estimatedDuration;
-  const startTime = Date.now();
-  await new Promise<void>((resolve) => {
-    const tickMs = 80;
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(95, Math.round((elapsed / duration) * 95));
-      emitter.emitStepProgress(step, progress);
-      if (elapsed >= duration) {
-        clearInterval(interval);
-        resolve();
-      }
-    }, tickMs);
-  });
-  emitter.emitStepComplete(step);
-  return result;
+/** Returns wider periods that could satisfy a narrower request. */
+function widerPeriods(period: WrapPeriod): WrapPeriod[] {
+  const idx = PERIOD_ORDER.indexOf(period);
+  return PERIOD_ORDER.slice(idx + 1);
 }
 
 /**
- * Internal: run full Horizon indexing. When background is true, no step events are emitted.
+ * Compute an IndexerResult for a narrower period by filtering
+ * raw transactions from a wider cached fetch.
  */
-async function runIndexingInternal(
+function computeNarrowerResult(
   accountId: string,
   network: "mainnet" | "testnet",
   period: WrapPeriod,
-  background: boolean,
-): Promise<IndexerResult> {
-  const cacheKey = getCacheKey(accountId, network, period);
-  const emitter = IndexerEventEmitter.getInstance();
-  const server = getHorizonServer(network);
+  widerTransactions: unknown[],
+): IndexerResult {
   const days = PERIODS[period];
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  let currentEmittedStep: IndexingStep = "initializing";
+  const filtered = (widerTransactions as Array<{ created_at: string }>).filter(
+    (tx) => new Date(tx.created_at) >= cutoffDate,
+  );
 
-  const emit = (fn: () => void) => {
-    if (!background) fn();
-  };
-
-  try {
-    currentEmittedStep = "initializing";
-    emit(() => console.log("Emitting step change: initializing"));
-    emit(() => emitter.emitStepChange("initializing"));
-    await animateStep("initializing", emitter, () => {
-      getHorizonServer(network);
-    }, background);
-    emit(() => console.log("Step complete: initializing"));
-
-    currentEmittedStep = "fetching-transactions";
-    emit(() => emitter.emitStepChange("fetching-transactions"));
-
-    const allTransactions: unknown[] = [];
-    const fetchDuration =
-      INDEXING_STEPS["fetching-transactions"].estimatedDuration;
-    const fetchStart = Date.now();
-
-    let cursor: string | undefined;
-    let hasMore = true;
-    let pageCount = 0;
-
-    while (hasMore) {
-      let response: unknown;
-      try {
-        response = await concurrencyManager.run(async () => {
-          const builder = server
-            .transactions()
-            .forAccount(accountId)
-            .limit(200);
-          if (cursor) {
-            builder.cursor(cursor);
-          }
-          return builder.call();
-        });
-      } catch (error: unknown) {
-        const errorObj = error as {
-          response?: { status?: number };
-          code?: string;
-          name?: string;
-          message?: string;
-        };
-        if (errorObj?.response?.status === 404) {
-          throw new Error("Account not found (404). Please check the address.");
-        } else if (errorObj?.response?.status === 429) {
-          throw new Error("Rate limit exceeded (429). Please try again later.");
-        } else if (errorObj?.response?.status === 500) {
-          throw new Error("Server error (500). Please try again later.");
-        } else if (
-          errorObj?.code === "ECONNABORTED" ||
-          errorObj?.name === "TimeoutError"
-        ) {
-          throw new Error("Network timeout. Please check your connection.");
-        } else {
-          throw new Error(
-            "Unknown error fetching transactions: " +
-              (errorObj?.message || String(error)),
-          );
-        }
-      }
-
-      const respRecords = (response as { records: TransactionRecord[] })
-        .records;
-      if (!respRecords || respRecords.length === 0) {
-        hasMore = false;
-        break;
-      }
-
-      pageCount++;
-      const timeProgress = Math.round(
-        ((Date.now() - fetchStart) / fetchDuration) * 95,
-      );
-      emit(() =>
-        emitter.emitStepProgress(
-          "fetching-transactions",
-          Math.min(95, Math.max(pageCount * 15, timeProgress)),
-        ),
-      );
-
-      // Fetch operations for each transaction and attach as array
-      const recordsWithOps = await Promise.all(
-        respRecords.map(async (tx: TransactionRecord) => {
-          const txRecord = tx as {
-            operations: () => Promise<{ records: OperationRecord[] }>;
-          } & TransactionRecord;
-          const opsPage = await txRecord.operations();
-          return {
-            ...txRecord,
-            operations: opsPage.records as OperationRecord[],
-          };
-        }),
-      );
-      const recordsInRange = recordsWithOps.filter((tx: TransactionRecord) => {
-        return new Date(tx.created_at) >= cutoffDate;
-      });
-      allTransactions.push(...recordsInRange);
-
-      // Emit metrics update - transaction count
-      emit(() =>
-        emitter.emitMetricsUpdate({
-          transactionCount: allTransactions.length,
-        }),
-      );
-
-      if (
-        recordsWithOps.some((tx: TransactionRecord) => {
-          return new Date(tx.created_at) < cutoffDate;
-        })
-      ) {
-        hasMore = false;
-        break;
-      }
-
-      cursor =
-        respRecords.length === 200 &&
-        respRecords[respRecords.length - 1].paging_token
-          ? String(respRecords[respRecords.length - 1].paging_token)
-          : undefined;
-      if (!cursor) hasMore = false;
-    }
-
-    const fetchElapsed = Date.now() - fetchStart;
-    if (!background && fetchElapsed < fetchDuration) {
-      const remaining = fetchDuration - fetchElapsed;
-      const tickMs = 80;
-      await new Promise<void>((resolve) => {
-        let spent = 0;
-        const interval = setInterval(() => {
-          spent += tickMs;
-          const progress = Math.min(
-            95,
-            Math.round(((fetchElapsed + spent) / fetchDuration) * 95),
-          );
-          emitter.emitStepProgress("fetching-transactions", progress);
-          if (spent >= remaining) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, tickMs);
-      });
-    }
-    emit(() => emitter.emitStepProgress("fetching-transactions", 100));
-    emit(() => emitter.emitStepComplete("fetching-transactions"));
-
-    currentEmittedStep = "filtering-timeframes";
-    emit(() => emitter.emitStepChange("filtering-timeframes"));
-    const filteredTransactions = await animateStep(
-      "filtering-timeframes",
-      emitter,
-      () => {
-        const filtered = allTransactions.filter((tx) => {
-          const txData = tx as unknown as Record<string, unknown>;
-          return new Date(txData.created_at as string) >= cutoffDate;
-        });
-        // Emit metrics update - timeframes processed
-        emit(() =>
-          emitter.emitMetricsUpdate({
-            timeframesProcessed: 1,
-          }),
-        );
-        return filtered;
-      },
-      background,
-    );
-
-    currentEmittedStep = "calculating-volume";
-    emit(() => emitter.emitStepChange("calculating-volume"));
-    await animateStep("calculating-volume", emitter, () => {
-      let totalVolume = 0;
-      filteredTransactions.forEach((tx) => {
-        const txData = tx as Record<string, unknown>;
-        (Array.isArray(txData.operations) ? txData.operations : []).forEach(
-          (op) => {
-            const opData = op as Record<string, unknown>;
-            if (opData.type === "payment" && opData.amount) {
-              totalVolume += parseFloat(String(opData.amount));
-            }
-          },
-        );
-      });
-      // Emit metrics update - volume processed
-      emit(() =>
-        emitter.emitMetricsUpdate({
-          volumeProcessed: totalVolume.toFixed(2),
-        }),
-      );
-    }, background);
-
-    currentEmittedStep = "identifying-assets";
-    emit(() => emitter.emitStepChange("identifying-assets"));
-    const assetMap = await animateStep("identifying-assets", emitter, () => {
-      const map = new Map<string, number>();
-      filteredTransactions.forEach((tx) => {
-        const txData = tx as Record<string, unknown>;
-        (Array.isArray(txData.operations) ? txData.operations : []).forEach(
-          (op) => {
-            const opData = op as Record<string, unknown>;
-            if (opData.type === "payment") {
-              const key = String(opData.asset_code || "native");
-              map.set(key, (map.get(key) || 0) + 1);
-            }
-          },
-        );
-      });
-      // Emit metrics update - asset count
-      emit(() =>
-        emitter.emitMetricsUpdate({
-          assetCount: map.size,
-        }),
-      );
-      return map;
-    }, background);
-
-    currentEmittedStep = "counting-contracts";
-    emit(() => emitter.emitStepChange("counting-contracts"));
-    const contractCount = await animateStep("counting-contracts", emitter, () => {
-      const count = filteredTransactions.reduce((count: number, tx) => {
-        const txData = tx as Record<string, unknown>;
-        return (
-          count +
-          (Array.isArray(txData.operations) ? txData.operations : []).filter(
-            (op) =>
-              (op as Record<string, unknown>).type === "invoke_host_function",
-          ).length
-        );
-      }, 0);
-      // Emit metrics update - contract count
-      emit(() =>
-        emitter.emitMetricsUpdate({
-          contractCount: count,
-        }),
-      );
-      return count;
-    }, background);
-
-    currentEmittedStep = "finalizing";
-    emit(() => emitter.emitStepChange("finalizing"));
-    const result = await animateStep("finalizing", emitter, () => {
-      const typedTransactions = allTransactions.map((tx) => {
-        const txData = tx as Record<string, unknown>;
-        return {
-          created_at: String(txData.created_at || new Date().toISOString()),
-          memo: txData.memo ? String(txData.memo) : undefined,
-          operations: Array.isArray(txData.operations) ? txData.operations : [],
-        };
-      });
-      const r = calculateAchievements(typedTransactions);
-      r.accountId = accountId;
-      // Use assetMap and contractCount for additional metadata if needed
-      void assetMap;
-      void contractCount;
-      return r;
-    }, background);
-
-    emit(() => emitter.emitIndexingComplete(result));
-    await setCacheEntry(cacheKey, { result, timestamp: Date.now() });
-    return result;
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error during indexing";
-    console.error(`Error indexing account ${accountId}:`, error);
-    emit(() => emitter.emitStepError(currentEmittedStep, errorMessage, true));
-    throw error;
-  }
+  const result = calculateAchievements(filtered as Parameters<typeof calculateAchievements>[0]);
+  result.accountId = accountId;
+  return result;
 }
 
 /**
- * Index account with cache: return cached data if fresh, else index and optionally
- * return stale cache while re-indexing in background.
+ * Index account with browser IndexedDB cache: return cached data if fresh,
+ * else index and optionally return stale cache while re-indexing in background.
+ *
+ * When a narrower period is requested and no exact cache entry exists,
+ * wider cached entries (which contain raw transactions) are used to
+ * derive the narrower result in memory — avoiding duplicate Horizon requests.
  */
 export async function indexAccount(
   accountId: string,
   network: "mainnet" | "testnet" = "mainnet",
   period: WrapPeriod = "monthly",
+  options?: { bypassCache?: boolean },
 ): Promise<IndexerResultWithMeta> {
+  const { bypassCache = false } = options ?? {};
   const cacheKey = getCacheKey(accountId, network, period);
-  const cached = await getCacheEntry(cacheKey);
 
-  if (cached && isCacheValid(cached)) {
-    return {
-      result: cached.result,
-      fromCache: true,
-      cacheTimestamp: cached.timestamp,
-    };
+  let cached: Awaited<ReturnType<typeof getCacheEntry>> | undefined;
+
+  if (!bypassCache) {
+    cached = await getCacheEntry(cacheKey);
+
+    if (cached && isCacheValid(cached)) {
+      return {
+        result: cached.result,
+        fromCache: true,
+        cacheTimestamp: cached.timestamp,
+      };
+    }
+
+    if (cached && !isCacheValid(cached)) {
+      void runIndexingCore(accountId, network, period, true).then(
+        (data) => {
+          setCacheEntry(cacheKey, {
+            result: data.result,
+            timestamp: Date.now(),
+            transactions: data.transactions,
+          });
+        },
+        (err) => {
+          indexerWarn("Background refresh failed", err);
+        },
+      );
+      return {
+        result: cached.result,
+        fromCache: true,
+        cacheTimestamp: cached.timestamp,
+        refreshingInBackground: true,
+      };
+    }
+
+    // No valid exact-period cache — check wider periods for raw transactions
+    // so we can derive the narrower result without a Horizon request.
+    for (const widerPeriod of widerPeriods(period)) {
+      const widerKey = getCacheKey(accountId, network, widerPeriod);
+      const widerCached = await getCacheEntry(widerKey);
+
+      if (widerCached && isCacheValid(widerCached) && widerCached.transactions) {
+        const narrowerResult = computeNarrowerResult(
+          accountId,
+          network,
+          period,
+          widerCached.transactions,
+        );
+
+        // Populate the narrower cache so future direct requests are also served.
+        await setCacheEntry(cacheKey, {
+          result: narrowerResult,
+          timestamp: Date.now(),
+          transactions: widerCached.transactions,
+        });
+
+        return {
+          result: narrowerResult,
+          fromCache: true,
+          cacheTimestamp: widerCached.timestamp,
+        };
+      }
+    }
   }
 
-  if (cached && !isCacheValid(cached)) {
-    // Return stale cache immediately and refresh in background
-    void runIndexingInternal(accountId, network, period, true).then(
-      (result) => {
-        setCacheEntry(cacheKey, { result, timestamp: Date.now() });
-      },
-      (err) => {
-        console.warn("[Indexer] Background refresh failed:", err);
-      },
-    );
+  try {
+    const data = await runIndexingCore(accountId, network, period, false);
+    await setCacheEntry(cacheKey, {
+      result: data.result,
+      timestamp: Date.now(),
+      transactions: data.transactions,
+    });
     return {
-      result: cached.result,
-      fromCache: true,
-      cacheTimestamp: cached.timestamp,
-      refreshingInBackground: true,
+      result: data.result,
+      fromCache: false,
     };
+  } catch (error) {
+    if (cached) {
+      indexerWarn("Fresh indexing failed, using stale cache", error);
+      return {
+        result: cached.result,
+        fromCache: true,
+        cacheTimestamp: cached.timestamp,
+        refreshingInBackground: false,
+      };
+    }
+    throw error;
   }
-
-  const result = await runIndexingInternal(accountId, network, period, false);
-  return {
-    result,
-    fromCache: false,
-  };
 }
+
+export { runIndexingCore } from "./indexerCore";

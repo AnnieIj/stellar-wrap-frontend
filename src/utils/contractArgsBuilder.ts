@@ -10,7 +10,8 @@
  * @module contractArgsBuilder
  */
 
-import { xdr } from "stellar-sdk";
+import { xdr, SorobanRpc, Contract, TransactionBuilder, Networks, BASE_FEE } from "stellar-sdk";
+import { isAllowed, getPublicKey, signTransaction as freighterSignTransaction } from "@stellar/freighter-api";
 import {
   toScVal,
   addressToScVal,
@@ -66,6 +67,60 @@ function unwrap(
     return null;
   }
   return result.value;
+}
+
+const STROOPS_PER_XLM = 10_000_000n;
+const RPC_MIN_INTERVAL_MS = 100;
+let lastRpcCallTimestamp = 0;
+
+/**
+ * Parses a Stellar amount into stroops as a BigInt for i128 ScVal values.
+ */
+export function parseStellarAmount(amount: string | number): bigint | null {
+  const raw = typeof amount === "number" ? amount.toFixed(7) : amount.trim();
+  if (!/^\d+(\.\d{1,7})?$/.test(raw)) return null;
+  const [whole, fraction = ""] = raw.split(".");
+  return BigInt(whole) * STROOPS_PER_XLM + BigInt(fraction.padEnd(7, "0"));
+}
+
+/**
+ * Formats a stroop value back into a human-readable Stellar amount string.
+ */
+export function formatStellarAmount(stroops: bigint | number | string): string {
+  const asBigInt = BigInt(stroops);
+  const negative = asBigInt < 0n;
+  const abs = negative ? -asBigInt : asBigInt;
+  const whole = abs / STROOPS_PER_XLM;
+  const fraction = abs % STROOPS_PER_XLM;
+  const formatted = `${whole.toString()}.${fraction.toString().padStart(7, "0").replace(/0+$/, "")}`;
+  return `${negative ? "-" : ""}${formatted.replace(/\.$/, "")}`;
+}
+
+async function throttledRpcCall<T>(rpcCall: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const wait = Math.max(0, RPC_MIN_INTERVAL_MS - (now - lastRpcCallTimestamp));
+  lastRpcCallTimestamp = now + wait;
+  if (wait > 0) {
+    await new Promise<void>((resolve) => setTimeout(resolve, wait));
+  }
+  return rpcCall();
+}
+
+export async function getFreighterPublicKey(): Promise<string> {
+  try {
+    if (!(await isAllowed())) {
+      throw new Error("Freighter is not connected.");
+    }
+    return await getPublicKey();
+  } catch (error) {
+    const reason =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Freighter is not available";
+    throw new Error(`Unable to connect to Freighter: ${reason}`);
+  }
 }
 
 // ─── Validation ─────────────────────────────────────────────────────────────
@@ -132,7 +187,7 @@ export function validateIndexedStats(stats: ContractStatsInput): string[] {
  *
  * Argument order (matching contract function signature):
  *   0: accountAddress → ScVal.scvAddress
- *   1: totalVolume    → ScVal.scvU64  (BigInt)
+ *   1: totalVolume    → ScVal.scvI128 (stroops)
  *   2: mostActiveAsset→ ScVal.scvString
  *   3: contractCalls  → ScVal.scvU32
  *   4: timeframe      → ScVal.scvString (optional, defaults to "all")
@@ -181,15 +236,24 @@ export function buildContractArgs(
     argDescriptions.push(`accountAddress: ${accountAddress}`);
   }
 
-  // 3. Convert totalVolume → ScVal.scvU64
-  const volumeVal = unwrap(
-    toScVal(stats.totalVolume, "u64"),
-    "totalVolume",
-    errors,
-  );
-  if (volumeVal) {
-    args.push(volumeVal);
-    argDescriptions.push(`totalVolume: ${stats.totalVolume} (u64)`);
+  // 3. Convert totalVolume → ScVal.scvI128 (in stroops)
+  const totalVolumeStroops = parseStellarAmount(stats.totalVolume);
+  if (totalVolumeStroops === null) {
+    errors.push(
+      "totalVolume must be a valid Stellar amount with at most 7 decimal places",
+    );
+  } else {
+    const volumeVal = unwrap(
+      toScVal(totalVolumeStroops, "i128"),
+      "totalVolume",
+      errors,
+    );
+    if (volumeVal) {
+      args.push(volumeVal);
+      argDescriptions.push(
+        `totalVolume: ${stats.totalVolume} (i128 stroops, ${totalVolumeStroops})`,
+      );
+    }
   }
 
   // 4. Convert mostActiveAsset → ScVal.scvString
@@ -279,8 +343,14 @@ export function buildContractArgsAsMap(
   }
 
   // 2. Stats as a map
+  const totalVolumeStroops = parseStellarAmount(stats.totalVolume);
+  if (totalVolumeStroops === null) {
+    errors.push(
+      "totalVolume must be a valid Stellar amount with at most 7 decimal places",
+    );
+  }
   const statsForMap: Record<string, unknown> = {
-    total_volume: stats.totalVolume,
+    total_volume: totalVolumeStroops ?? stats.totalVolume,
     most_active_asset: stats.mostActiveAsset,
     contract_calls: stats.contractCalls,
   };
@@ -289,7 +359,7 @@ export function buildContractArgsAsMap(
   }
 
   const typeHints: Record<string, ScValTargetType> = {
-    total_volume: "u64",
+    total_volume: "i128",
     most_active_asset: "string",
     contract_calls: "u32",
     timeframe: "string",
@@ -314,6 +384,183 @@ export function buildContractArgsAsMap(
   return {
     success: true,
     data: { args, argDescriptions },
+  };
+}
+// ─── Soroban RPC Execution ──────────────────────────────────────────────────
+export interface SorobanInvokeOptions {
+  rpcUrl: string;
+  publicKey?: string;
+  contractId: string;
+  method: string;
+  args: xdr.ScVal[];
+  networkPassphrase?: string;
+  timeoutMs?: number;
+}
+
+export interface SorobanInvokeResult {
+  hash: string;
+  status: string;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operation: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${operation} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+/**
+ * Polls the Soroban RPC server until a submitted transaction reaches a
+ * terminal state or the deadline expires.
+ */
+async function waitForSorobanTransaction(
+  server: SorobanRpc.Server,
+  hash: string,
+  timeoutMs: number,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let delayMs = 500;
+
+  while (Date.now() < deadline) {
+    const response = await withTimeout(
+      throttledRpcCall(() => server.getTransaction(hash)),
+      Math.min(timeoutMs, 10_000),
+      "Fetching transaction status",
+    );
+
+    if (response.status === "SUCCESS") {
+      return response.status;
+    }
+
+    if (response.status === "FAILED") {
+      throw new Error(`Soroban transaction failed: ${hash}`);
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(delayMs, remainingMs)),
+    );
+    delayMs = Math.min(delayMs * 2, 5_000);
+  }
+
+  throw new Error(
+    `Timed out waiting for transaction ${hash} after ${timeoutMs}ms`,
+  );
+}
+
+export async function invokeSorobanContract(
+  options: SorobanInvokeOptions,
+): Promise<SorobanInvokeResult> {
+  const {
+    rpcUrl,
+    publicKey,
+    contractId,
+    method,
+    args,
+    networkPassphrase = Networks.TESTNET,
+    timeoutMs = 30_000,
+  } = options;
+
+  const resolvedPublicKey = publicKey ?? (await getFreighterPublicKey());
+  const server = new SorobanRpc.Server(rpcUrl, { allowHttp: true });
+  const source = await withTimeout(
+    throttledRpcCall(() => server.getAccount(resolvedPublicKey)),
+    timeoutMs,
+    "Fetching account",
+  );
+
+  const contract = new Contract(contractId);
+  const transaction = new TransactionBuilder(source, {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(0)
+    .build();
+
+  const simulation = await withTimeout(
+    throttledRpcCall(() => server.simulateTransaction(transaction)),
+    timeoutMs,
+    "Simulating transaction",
+  );
+
+  if ("error" in simulation && typeof simulation.error === "string") {
+    throw new Error(`Soroban simulation failed: ${simulation.error}`);
+  }
+
+  const prepared = SorobanRpc.assembleTransaction(
+    simulation,
+    networkPassphrase,
+  ).build();
+
+  let signedXdr: string;
+  try {
+    signedXdr = await withTimeout(
+      freighterSignTransaction(prepared.toXDR(), {
+        networkPassphrase,
+      }),
+      timeoutMs,
+      "Signing transaction",
+    );
+  } catch (error) {
+    const reason =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Unknown error";
+    throw new Error(`Transaction signature was rejected. ${reason}`);
+  }
+
+  const signedTransaction = TransactionBuilder.fromXDR(
+    signedXdr,
+    networkPassphrase,
+  );
+
+  const response = await withTimeout(
+    throttledRpcCall(() => server.sendTransaction(signedTransaction)),
+    timeoutMs,
+    "Sending transaction",
+  );
+
+  if (response.status === "PENDING" || response.status === "DUPLICATE") {
+    const finalStatus = await waitForSorobanTransaction(
+      server,
+      response.hash,
+      timeoutMs,
+    );
+
+    return {
+      hash: response.hash,
+      status: finalStatus,
+    };
+  }
+
+  if (response.status === "ERROR") {
+    throw new Error(`Soroban send transaction failed: ${response.hash}`);
+  }
+
+  return {
+    hash: response.hash,
+    status: response.status,
   };
 }
 
@@ -342,4 +589,158 @@ export function logContractArgs(
     });
     console.groupEnd();
   }
+}
+// ─── mint_wrap Argument Builder ─────────────────────────────────────────────
+
+/**
+ * Input required to build arguments for the `mint_wrap` contract call.
+ *
+ * IMPORTANT: `dataHash` and `signature` must be produced by a trusted
+ * backend/attestation service that hashes the verified stats payload and
+ * signs it server-side. This builder does NOT compute or fabricate them —
+ * without server-side signing, any client could mint an arbitrary
+ * archetype/period for itself. See PR notes for the outstanding backend
+ * work this depends on.
+ */
+export interface MintWrapArgsInput {
+  accountAddress: string;
+  period: string;
+  archetype: string;
+  dataHash: Uint8Array;
+  signature: Uint8Array;
+}
+
+/**
+ * Validates input before building mint_wrap ScVal args.
+ */
+export function validateMintWrapInput(input: MintWrapArgsInput): string[] {
+  const errors: string[] = [];
+
+  if (!input || typeof input !== "object") {
+    return ["Mint wrap input must be a non-null object"];
+  }
+
+  if (
+    typeof input.accountAddress !== "string" ||
+    input.accountAddress.trim().length === 0
+  ) {
+    errors.push("accountAddress must be a non-empty string");
+  }
+
+  if (typeof input.period !== "string" || input.period.trim().length === 0) {
+    errors.push(
+      'period must be a non-empty string (e.g. "weekly", "monthly", "yearly")',
+    );
+  }
+
+  if (
+    typeof input.archetype !== "string" ||
+    input.archetype.trim().length === 0
+  ) {
+    errors.push("archetype must be a non-empty string (the persona label)");
+  }
+
+  if (!(input.dataHash instanceof Uint8Array) || input.dataHash.length === 0) {
+    errors.push(
+      "dataHash must be a non-empty byte array produced by the backend signing service",
+    );
+  }
+
+  if (
+    !(input.signature instanceof Uint8Array) ||
+    input.signature.length === 0
+  ) {
+    errors.push(
+      "signature must be a non-empty byte array produced by the backend signing service",
+    );
+  }
+
+  return errors;
+}
+
+/**
+ * Builds ordered ScVal arguments for the `mint_wrap` contract function.
+ *
+ * Argument order (matches deployed contract signature):
+ *   0: user      → ScVal.scvAddress
+ *   1: period    → ScVal.scvString
+ *   2: archetype → ScVal.scvString
+ *   3: data_hash → ScVal.scvBytes
+ *   4: signature → ScVal.scvBytes
+ *
+ * @example
+ * ```ts
+ * const result = buildMintWrapArgs({
+ *   accountAddress: 'GABC...XYZ',
+ *   period: 'monthly',
+ *   archetype: 'The DeFi Patron',
+ *   dataHash: attestation.dataHash,
+ *   signature: attestation.signature,
+ * });
+ *
+ * if (result.success) {
+ *   contract.call('mint_wrap', ...result.data.args);
+ * }
+ * ```
+ */
+export function buildMintWrapArgs(input: MintWrapArgsInput): BuildArgsResult {
+  const validationErrors = validateMintWrapInput(input);
+  if (validationErrors.length > 0) {
+    return { success: false, errors: validationErrors };
+  }
+
+  const errors: string[] = [];
+  const args: xdr.ScVal[] = [];
+  const argDescriptions: string[] = [];
+
+  const userVal = unwrap(addressToScVal(input.accountAddress), "user", errors);
+  if (userVal) {
+    args.push(userVal);
+    argDescriptions.push(`user: ${input.accountAddress}`);
+  }
+
+  const periodVal = unwrap(toScVal(input.period, "string"), "period", errors);
+  if (periodVal) {
+    args.push(periodVal);
+    argDescriptions.push(`period: "${input.period}" (string)`);
+  }
+
+  const archetypeVal = unwrap(
+    toScVal(input.archetype, "string"),
+    "archetype",
+    errors,
+  );
+  if (archetypeVal) {
+    args.push(archetypeVal);
+    argDescriptions.push(`archetype: "${input.archetype}" (string)`);
+  }
+
+  const dataHashVal = unwrap(
+    toScVal(input.dataHash, "bytes"),
+    "data_hash",
+    errors,
+  );
+  if (dataHashVal) {
+    args.push(dataHashVal);
+    argDescriptions.push(`data_hash: <${input.dataHash.length} bytes>`);
+  }
+
+  const signatureVal = unwrap(
+    toScVal(input.signature, "bytes"),
+    "signature",
+    errors,
+  );
+  if (signatureVal) {
+    args.push(signatureVal);
+    argDescriptions.push(`signature: <${input.signature.length} bytes>`);
+  }
+
+  if (errors.length > 0) {
+    return { success: false, errors };
+  }
+
+  return {
+    success: true,
+    data: { args, argDescriptions },
+  };
 }

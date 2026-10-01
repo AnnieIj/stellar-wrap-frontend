@@ -1,5 +1,8 @@
 import { parseHorizonError, StructuredHorizonError } from './horizonErrorHandler';
 import { useRateLimitStore } from '../store/rateLimitStore';
+import { logger } from '../../app/utils/logger';
+
+const log = logger.child('horizonRequestQueue');
 
 type RequestFn<T> = () => Promise<T>;
 
@@ -85,7 +88,7 @@ export class HorizonRequestQueue {
                     .getState()
                     .setMessage(`Retrying in ${Math.ceil(delay / 1000)}s...`);
 
-                console.warn(
+                log.warn(
                     `Retrying Horizon request (attempt ${item.attempts}) in ${delay}ms: ${structuredError.message}`,
                 );
 
