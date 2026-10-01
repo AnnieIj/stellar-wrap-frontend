@@ -72,6 +72,19 @@
     "downloadPng": "Download PNG",
     "downloading": "Downloading..."
   },
+  "PersonaPage": {
+    "title": "Your Stellar Persona",
+    "subtitle": "The on-chain archetype your activity reveals",
+    "loading": "Reading your on-chain history...",
+    "errorTitle": "We couldn't load your persona",
+    "errorDescription": "Something went wrong while analyzing your Stellar activity. Please try again.",
+    "retry": "Try again",
+    "emptyTitle": "No persona yet",
+    "emptyDescription": "Connect a wallet with Stellar activity to reveal your persona.",
+    "connectWallet": "Connect Wallet",
+    "sharePersona": "Share my persona",
+    "backToWrap": "Back to my wrap"
+  },
   "Og": {
     "title": "{username}'s Stellar Wrap",
     "description": "Check out this Stellar blockchain year in review — transactions, DeFi persona, and vibes!",
