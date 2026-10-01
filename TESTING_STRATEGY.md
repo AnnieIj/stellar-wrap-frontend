@@ -1,0 +1,281 @@
+# Testing Strategy
+
+## Overview
+
+This project uses a **dual test runner strategy** to leverage the strengths of each testing framework:
+
+| Framework | Purpose | When to Use |
+|-----------|---------|-------------|
+| **Jest** | Unit tests with mocking | Testing isolated functions, components, modules |
+| **Vitest** | Integration & comprehensive tests | Testing service interactions, edge cases, large test suites |
+| **Playwright** | Visual regression & E2E | Testing UI rendering and user flows |
+
+## File Naming Convention
+
+The test runner is determined by the file naming pattern:
+
+```
+✅ *.test.ts          → Jest (unit tests)
+✅ *.test.tsx         → Jest (React component tests)
+✅ *.comprehensive.test.ts → Vitest (comprehensive test suites)
+✅ *.edge.test.ts     → Vitest (edge case tests)
+✅ *.integration.test.ts   → Vitest (integration tests)
+✅ *.spec.ts          → Playwright (E2E/visual tests)
+```
+
+## Decision Matrix
+
+### Use Jest when:
+- ✅ Testing a single function or method in isolation
+- ✅ Testing React components
+- ✅ Need extensive mocking of dependencies
+- ✅ Testing Next.js-specific features
+- ✅ Writing traditional unit tests
+
+### Use Vitest when:
+- ✅ Testing interactions between multiple services
+- ✅ Writing comprehensive test suites (100+ assertions)
+- ✅ Testing edge cases and boundary conditions
+- ✅ Need fast test execution and HMR
+- ✅ Testing with minimal or no mocks (integration style)
+
+### Use Playwright when:
+- ✅ Testing visual appearance of components
+- ✅ Testing complete user flows (E2E)
+- ✅ Visual regression testing
+
+## Commands
+
+```bash
+# Run all tests (Jest + Vitest)
+pnpm test
+
+# Run only unit tests (Jest)
+pnpm test:unit
+
+# Run only integration tests (Vitest)
+pnpm test:integration
+
+# Watch mode
+pnpm test:watch              # Jest
+pnpm test:integration:watch  # Vitest
+
+# UI mode (Vitest only)
+pnpm test:integration:ui
+
+# Coverage
+pnpm test:coverage  # Jest coverage
+
+# Visual tests
+pnpm test:visual
+pnpm test:visual:update  # Update snapshots
+
+# E2E tests (Playwright)
+pnpm test:e2e
+pnpm test:e2e:ui
+```
+
+## Configuration Files
+
+| File | Purpose | Key Settings |
+|------|---------|-------------|
+| `jest.config.js` | Jest configuration | Excludes `*.comprehensive.test.ts` and `*.edge.test.ts` |
+| `vitest.config.ts` | Vitest configuration | Includes only `*.comprehensive.test.ts`, `*.edge.test.ts`, `*.integration.test.ts` |
+| `playwright.config.ts` | Playwright configuration | Visual regression settings |
+
+## CI Pipeline
+
+The CI runs tests in this order:
+
+1. **Lint** - Code quality checks
+2. **Jest unit tests** - Fast unit tests with mocks
+3. **Vitest integration tests** - Comprehensive integration tests
+4. **Build** - Ensure code compiles
+5. **Playwright visual tests** - Visual regression (separate workflow)
+
+All test suites must pass for PR approval.
+
+## Coverage
+
+Jest generates coverage reports for unit tests:
+- **Target**: 80%+ for all metrics
+- **Report**: `coverage/lcov-report/index.html`
+- **Command**: `pnpm test:coverage`
+
+## E2E Tests
+
+End-to-end tests live under `e2e/` and run with Playwright (`*.spec.ts`). They exercise complete user journeys against the running app, mocking network requests and global state so runs are deterministic in CI.
+
+### Smart Contract Invocation Flow
+
+The Smart Contract Invocation journey is covered end-to-end in `e2e/smart-contract-invocation.spec.ts`. The suite walks a user from opening the invocation page through connecting a wallet, entering contract details, submitting the invocation, and confirming the result. It also covers the unhappy paths and edge cases required by the acceptance criteria:
+
+- **Happy path**: connect wallet → fill contract address, method, and arguments → submit → success confirmation with the returned transaction hash.
+- **Validation errors**: missing/invalid contract address, empty method name, and malformed JSON arguments surface inline errors and block submission.
+- **Wallet errors**: rejected connection and rejected signature requests show a recoverable error state without losing entered form data.
+- **Network errors**: RPC/indexer failures are mocked to return errors and the UI shows a retry affordance that succeeds on the next attempt.
+- **Edge cases**: empty argument list, very large argument payloads, and duplicate submissions (button disabled while pending) are asserted.
+
+Network requests are intercepted with `page.route(...)` and global wallet state is stubbed via `page.addInitScript(...)`, so no real chain or wallet is required. Tests use role/text-based locators and explicit `expect(...).toBeVisible()` waits (no arbitrary timeouts) to stay reliable and flake-free in CI.
+
+## Examples
+
+### Jest Unit Test Example
+
+```typescript
+// app/services/__tests__/myService.test.ts
+import { myFunction } from '../myService';
+
+describe('MyService', () => {
+  it('should process valid input', () => {
+    const result = myFunction({ value: 42 });
+    expect(result).toBe(84);
+  });
+
+  it('should throw on invalid input', () => {
+    expect(() => myFunction(null)).toThrow('Invalid input');
+  });
+});
+```
+
+### Vitest Integration Test Example
+
+```typescript
+// app/services/__tests__/myService.comprehensive.test.ts
+import { describe, it, expect } from 'vitest';
+import { myService } from '@/app/services/myService';
+
+describe('MyService Comprehensive Tests', () => {
+  it('handles edge case: empty dataset', () => {
+    const result = myService.process([]);
+    expect(result).toEqual({ count: 0, items: [] });
+  });
+
+  it('handles edge case: large dataset', () => {
+    const largeData = Array.from({ length: 100000 }, (_, i) => i);
+    const result = myService.process(largeData);
+    expect(result.count).toBe(100000);
+  });
+
+  it('integrates with cache and indexer', () => {
+    // Test with real dependencies, minimal mocking
+    const result = myService.fullFlow();
+    expect(result.cached).toBe(true);
+    expect(result.indexed).toBe(true);
+  });
+});
+```
+
+### Playwright E2E Test Example
+
+```typescript
+// e2e/transaction-signing.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Transaction Signing flow', () => {
+  test('signs a transaction end to end', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Connect Wallet' }).click();
+    await page.getByRole('button', { name: 'Sign Transaction' }).click();
+    await expect(page.getByText('Transaction signed')).toBeVisible();
+  });
+});
+```
+
+```typescript
+// e2e/smart-contract-invocation.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('invokes a smart contract successfully', async ({ page }) => {
+  await page.route('**/api/rpc', (route) =>
+    route.fulfill({ status: 200, body: JSON.stringify({ txHash: '0xabc' }) }),
+  );
+
+  await page.goto('/en/invoke');
+  await page.getByRole('button', { name: /connect wallet/i }).click();
+  await page.getByLabel(/contract address/i).fill('0x0000000000000000000000000000000000000000');
+  await page.getByLabel(/method/i).fill('transfer');
+  await page.getByRole('button', { name: /invoke/i }).click();
+
+  await expect(page.getByText(/0xabc/)).toBeVisible();
+});
+```
+
+## Transaction Signing E2E Tests
+
+The `Transaction Signing` user journey is critical and covered by Playwright E2E tests in `e2e/transaction-signing.spec.ts`. These tests simulate a user going through the flow from start to finish and must satisfy the following acceptance criteria:
+
+- **Wallet interaction**: Connect and interact gracefully with the target Web3 wallet (e.g., Freighter). Wallet APIs are stubbed via `page.addInitScript` so the flow is deterministic and does not depend on a real extension.
+- **Stellar amount formatting**: Verify correct parsing and formatting of Stellar amounts, including 7 decimal precision and Stroops conversion (e.g., `1.0000000` XLM ↔ `10000000` Stroops).
+- **Network latency & timeouts**: Simulate slow RPC responses and connection timeouts to confirm the UI degrades gracefully without crashing.
+- **Rejected signature**: Assert a clear error message is displayed when the user rejects the transaction signature.
+- **RPC optimization**: Assert that RPC calls are deduplicated/cached so repeated renders do not trigger redundant requests that could cause rate-limiting.
+
+### Running the Transaction Signing E2E Tests
+
+```bash
+# Run the full E2E suite
+pnpm test:e2e
+
+# Run only the Transaction Signing flow
+pnpm test:e2e -- e2e/transaction-signing.spec.ts
+
+# Debug interactively
+pnpm test:e2e:ui
+```
+
+## Migration Guide
+
+### Moving a Test from Jest to Vitest
+
+1. Rename file: `myService.test.ts` → `myService.comprehensive.test.ts`
+2. Add Vitest imports: `import { describe, it, expect } from 'vitest'`
+3. Replace Jest mocks with real implementations (if testing integration)
+4. Update any Jest-specific syntax
+
+### Moving a Test from Vitest to Jest
+
+1. Rename file: `myService.comprehensive.test.ts` → `myService.test.ts`
+2. Remove Vitest imports (Jest is global)
+3. Add mocks for external dependencies
+4. Update any Vitest-specific syntax
+
+## Best Practices
+
+1. **Follow naming conventions** - File names determine which runner executes the test
+2. **Keep tests focused** - Unit tests in Jest, integration in Vitest
+3. **Avoid mixing patterns** - Don't put comprehensive tests in `*.test.ts` files
+4. **Mock appropriately** - Heavy mocking in Jest, minimal in Vitest
+5. **Run locally** - Test with both runners before pushing
+6. **Check CI** - Ensure both test suites pass in CI
+
+## Troubleshooting
+
+### Test file not running?
+
+Check the file naming:
+- Jest: Must end with `.test.ts` or `.test.tsx`
+- Vitest: Must end with `.comprehensive.test.ts`, `.edge.test.ts`, or `.integration.test.ts`
+- Playwright: Must end with `.spec.ts`
+
+### Import errors?
+
+- **Jest**: Check `moduleNameMapper` in `jest.config.js`
+- **Vitest**: Check `resolve.alias` in `vitest.config.ts`
+
+### Tests timing out?
+
+- Increase timeout: `it('test', async () => {...}, 30000)`
+- Or set globally in config
+
+## Summary
+
+This dual-strategy approach gives us:
+
+✅ **Fast unit tests** with Jest's mature mocking ecosystem  
+✅ **Comprehensive integration tests** with Vitest's speed and modern features  
+✅ **Clear separation** through file naming conventions  
+✅ **No conflicts** - each runner handles its own test files  
+✅ **CI confidence** - both suites run on every PR
+
+For detailed usage, see [TESTING.md](./TESTING.md).

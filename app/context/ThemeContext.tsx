@@ -1,88 +1,98 @@
-"use client"
+"use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+/**
+ * ThemeContext / ThemeProvider
+ *
+ * This module intentionally stays thin:
+ *   - All persistent state lives in `useThemeStore` (Zustand + localStorage).
+ *   - `ThemeProvider` is a React component whose only job is to apply DOM
+ *     side-effects (CSS custom properties, `.dark` / `.light` class on
+ *     `<html>`) in response to store changes.
+ *   - `useTheme` is a convenience hook that re-exports the store's public API
+ *     so consumers don't need to import from two places.
+ *
+ * SSR / hydration strategy:
+ *   - The store's `_hydrated` flag is `false` on the first server render.
+ *   - `ThemeProvider` uses a `useEffect` (client-only) to apply the persisted
+ *     theme values, preventing a hydration mismatch.
+ *   - The `<html>` element always starts with the default `dark` class from
+ *     the server; any user preference is applied after mount with no visible
+ *     flash because CSS custom properties are set synchronously in the effect.
+ */
 
-export type ThemeColor = 'green' | 'pink' | 'yellow' | 'red' | 'purple';
+import React, { useEffect } from "react";
+import {
+  useThemeStore,
+  THEME_COLORS,
+  type ThemeColor,
+  type ThemeMode,
+  type ThemeRollback,
+} from "@/app/store/themeStore";
 
-interface ThemeContextType {
-  color: ThemeColor;
-  setColor: (color: ThemeColor) => void;
+// Re-export types so callers that imported from this file keep working.
+export type { ThemeColor, ThemeMode, ThemeRollback };
+
+// Re-export colour definitions for components that need the token values.
+// `themeColors` keeps backwards compatibility; `THEME_COLORS` is the canonical name.
+export { THEME_COLORS, THEME_COLORS as themeColors };
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const color = useThemeStore((s) => s.color);
+  const mode = useThemeStore((s) => s.mode);
+  const hydrated = useThemeStore((s) => s._hydrated);
+
+  // Apply CSS custom properties whenever the colour changes (client-only).
+  useEffect(() => {
+    if (!hydrated) return;
+    const theme = THEME_COLORS[color];
+    const root = document.documentElement;
+    root.style.setProperty("--color-theme-primary", theme.primary);
+    root.style.setProperty("--color-theme-primary-rgb", theme.primaryRgb);
+    root.style.setProperty("--color-theme-background", theme.background);
+    root.style.setProperty("--color-theme-gradient", theme.gradient);
+  }, [color, hydrated]);
+
+  // Apply dark/light class whenever the mode changes (client-only).
+  useEffect(() => {
+    if (!hydrated) return;
+    const root = document.documentElement;
+    if (mode === "dark") {
+      root.classList.add("dark");
+      root.classList.remove("light");
+    } else {
+      root.classList.add("light");
+      root.classList.remove("dark");
+    }
+  }, [mode, hydrated]);
+
+  return <>{children}</>;
 }
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+/**
+ * `useTheme` — primary hook for consuming theme state and actions.
+ *
+ * Stable reference: Zustand selectors subscribe only to the slices they read,
+ * so consumers that call `useTheme()` will only re-render when `color` or
+ * `mode` actually changes — not on every store write.
+ */
+export function useTheme(): {
+  color: ThemeColor;
+  mode: ThemeMode;
+  setColor: (color: ThemeColor) => ThemeRollback;
+  setMode: (mode: ThemeMode) => ThemeRollback;
+  toggleMode: () => ThemeRollback;
+} {
+  const color = useThemeStore((s) => s.color);
+  const mode = useThemeStore((s) => s.mode);
+  const setColorOptimistic = useThemeStore((s) => s.setColorOptimistic);
+  const setModeOptimistic = useThemeStore((s) => s.setModeOptimistic);
+  const toggleMode = useThemeStore((s) => s.toggleMode);
 
-export const themeColors = {
-  green: {
-    primary: '#1DB954',
-    primaryRgb: '29, 185, 84',
-    background: '#191414',
-    name: 'Spotify Green',
-    gradient: 'linear-gradient(135deg, #1DB954, #1ed760)',
-  },
-  pink: {
-    primary: '#FF6B9D',
-    primaryRgb: '255, 107, 157',
-    background: '#1a0f14',
-    name: 'Neon Pink',
-    gradient: 'linear-gradient(135deg, #FF6B9D, #C44569)',
-  },
-  yellow: {
-    primary: '#FFD700',
-    primaryRgb: '255, 215, 0',
-    background: '#1a1714',
-    name: 'Electric Yellow',
-    gradient: 'linear-gradient(135deg, #FFD700, #FFA500)',
-  },
-  red: {
-    primary: '#FF4444',
-    primaryRgb: '255, 68, 68',
-    background: '#1a0a0a',
-    name: 'Hot Red',
-    gradient: 'linear-gradient(135deg, #FF4444, #CC0000)',
-  },
-  purple: {
-    primary: '#9D4EDD',
-    primaryRgb: '157, 78, 221',
-    background: '#0d0208',
-    name: 'Deep Purple',
-    gradient: 'linear-gradient(135deg, #9D4EDD, #7209B7)',
-  },
-};
-
-export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [color, setColorState] = useState<ThemeColor>(() => {
-    // Check if we are in browser environment
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('stellar-theme-color');
-      return (saved as ThemeColor) || 'green';
-    }
-    return 'green';
-  });
-
-  const setColor = (newColor: ThemeColor) => {
-    setColorState(newColor);
-    localStorage.setItem('stellar-theme-color', newColor);
+  return {
+    color,
+    mode,
+    setColor: setColorOptimistic,
+    setMode: setModeOptimistic,
+    toggleMode,
   };
-
-  useEffect(() => {
-    const theme = themeColors[color];
-    document.documentElement.style.setProperty('--color-theme-primary', theme.primary);
-    document.documentElement.style.setProperty('--color-theme-primary-rgb', theme.primaryRgb);
-    document.documentElement.style.setProperty('--color-theme-background', theme.background);
-    document.documentElement.style.setProperty('--color-theme-gradient', theme.gradient);
-  }, [color]);
-
-  return (
-    <ThemeContext.Provider value={{ color, setColor }}>
-      {children}
-    </ThemeContext.Provider>
-  );
-};
-
-export const useTheme = () => {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within ThemeProvider');
-  }
-  return context;
-};
+}

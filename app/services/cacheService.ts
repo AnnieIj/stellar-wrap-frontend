@@ -13,6 +13,7 @@ import {
   setCacheEntry,
   invalidateCache as invalidateCacheEntry,
   clearCache as clearAllCache,
+  getMostRecentCacheEntry,
 } from "@/app/utils/indexedDbCache";
 
 export type Network = "mainnet" | "testnet";
@@ -36,6 +37,36 @@ export async function getCachedData(
 ): Promise<{ result: IndexerResult; timestamp: number } | null> {
   const entry = await getCacheEntry(key);
   return entry ? { result: entry.result, timestamp: entry.timestamp } : null;
+}
+
+export function parseCachedDataKey(
+  key: string,
+): { accountAddress: string; network: Network; timeframe: WrapPeriod } | null {
+  const [accountAddress, network, timeframe] = key.split(":");
+  if (
+    !accountAddress ||
+    !["mainnet", "testnet"].includes(network) ||
+    !["weekly", "biweekly", "monthly", "yearly"].includes(timeframe)
+  ) {
+    return null;
+  }
+
+  return {
+    accountAddress,
+    network: network as Network,
+    timeframe: timeframe as WrapPeriod,
+  };
+}
+
+export async function getMostRecentCachedData(): Promise<{
+  key: string;
+  result: IndexerResult;
+  timestamp: number;
+} | null> {
+  const entry = await getMostRecentCacheEntry();
+  return entry
+    ? { key: entry.key, result: entry.data.result, timestamp: entry.timestamp }
+    : null;
 }
 
 /**

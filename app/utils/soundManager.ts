@@ -1,4 +1,7 @@
 import { useSoundStore } from "../store/soundStore";
+import { logger } from "./logger";
+
+const log = logger.child("soundManager");
 
 
 export const SOUND_NAMES = {
@@ -60,11 +63,15 @@ class SoundManager {
     if (!pool) return null;
 
     let available = pool.find((instance) => !instance.isPlaying);
-    
+
     if (!available) {
       available = pool[0];
-      available.audio.pause();
-      available.audio.currentTime = 0;
+      try {
+        available.audio.pause();
+        available.audio.currentTime = 0;
+      } catch (error) {
+        // Ignore errors from resetting audio state
+      }
     }
 
     return available;
@@ -74,7 +81,6 @@ class SoundManager {
     if (typeof window === "undefined") return;
 
     if (soundName === SOUND_NAMES.BG_MUSIC) {
-      console.warn("BG_MUSIC should be played via startBackgroundMusic(), not playSound()");
       return;
     }
 
@@ -91,10 +97,24 @@ class SoundManager {
     instance.isPlaying = true;
     const audio = instance.audio;
 
-    audio.currentTime = 0;
-    audio.play().catch((error) => {
-      console.warn(`Failed to play sound ${soundName}:`, error);
+    try {
+      audio.currentTime = 0;
+    } catch (error) {
       instance.isPlaying = false;
+      return;
+    }
+
+    audio.play().catch((error) => {
+      instance.isPlaying = false;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (
+        errorMsg.includes("NotAllowedError") ||
+        errorMsg.includes("NotSupportedError") ||
+        errorMsg.includes("autoplay")
+      ) {
+        return;
+      }
+      log.warn(`Failed to play sound ${soundName}:`, error);
     });
 
     audio.onended = () => {
@@ -106,8 +126,13 @@ class SoundManager {
     if (typeof window === "undefined") return null;
     
     if (!this.audioContext) {
-      // eslint-disable-next-line
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // webkitAudioContext is a vendor-prefixed fallback for older Safari/iOS browsers
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioContextCtor) {
+        this.audioContext = new AudioContextCtor();
+      }
     }
     
     return this.audioContext;
@@ -121,6 +146,11 @@ class SoundManager {
       if (!audioContext) return;
 
       const response = await fetch(SOUND_FILES[SOUND_NAMES.BG_MUSIC]);
+      if (!response.ok) {
+        this.bgMusicLoaded = false;
+        return;
+      }
+
       const arrayBuffer = await response.arrayBuffer();
       this.bgMusicBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
@@ -130,7 +160,7 @@ class SoundManager {
 
       this.bgMusicLoaded = true;
     } catch (error) {
-      console.warn("Failed to load background music:", error);
+      this.bgMusicLoaded = false;
     }
   }
 
@@ -141,31 +171,30 @@ class SoundManager {
     if (this.bgMusicSource) {
       try {
         this.bgMusicSource.stop();
-        this.bgMusicSource.onended = null; 
+        this.bgMusicSource.onended = null;
       } catch (error) {
-        console.error("Failed to stop background music:", error);
+        // Source already stopped
       }
       this.bgMusicSource = null;
     }
 
     if (!this.isPlaying) return;
 
-    this.bgMusicSource = audioContext.createBufferSource();
-    this.bgMusicSource.buffer = this.bgMusicBuffer;
-    this.bgMusicSource.connect(this.bgMusicGainNode);
-
-    const currentSource = this.bgMusicSource;
-    this.bgMusicSource.onended = () => {
-      if (this.isPlaying && this.bgMusicSource === currentSource) {
-        this.bgMusicSource = null;
-        this.startLoop();
-      }
-    };
-
     try {
+      this.bgMusicSource = audioContext.createBufferSource();
+      this.bgMusicSource.buffer = this.bgMusicBuffer;
+      this.bgMusicSource.connect(this.bgMusicGainNode);
+
+      const currentSource = this.bgMusicSource;
+      this.bgMusicSource.onended = () => {
+        if (this.isPlaying && this.bgMusicSource === currentSource) {
+          this.bgMusicSource = null;
+          this.startLoop();
+        }
+      };
+
       this.bgMusicSource.start(0);
     } catch (error) {
-      console.warn("Failed to start audio source:", error);
       this.bgMusicSource = null;
       this.isPlaying = false;
     }
@@ -189,13 +218,11 @@ class SoundManager {
     }
 
     if (!this.bgMusicLoaded) {
-      console.warn("Background music not loaded");
       return;
     }
 
     const audioContext = this.getAudioContext();
     if (!audioContext) {
-      console.warn("AudioContext not available");
       return;
     }
 
@@ -203,8 +230,7 @@ class SoundManager {
       try {
         await audioContext.resume();
       } catch (error) {
-        console.warn("Failed to resume AudioContext:", error);
-        return; 
+        return;
       }
     }
 
@@ -220,7 +246,7 @@ class SoundManager {
         this.bgMusicSource.onended = null;
         this.bgMusicSource.stop();
       } catch (error) {
-        console.error("Failed to stop background music:", error);
+        log.error("Failed to stop background music:", error);
       }
       this.bgMusicSource = null;
     }
@@ -234,7 +260,7 @@ class SoundManager {
         this.bgMusicSource.onended = null;
         this.bgMusicSource.stop();
       } catch (error) {
-        console.error("Failed to pause background music:", error);
+        log.error("Failed to pause background music:", error);
       }
       this.bgMusicSource = null;
     }
@@ -258,13 +284,11 @@ class SoundManager {
     }
 
     if (!this.bgMusicLoaded) {
-      console.warn("Background music not loaded");
       return;
     }
 
     const audioContext = this.getAudioContext();
     if (!audioContext) {
-      console.warn("AudioContext not available");
       return;
     }
 
@@ -272,8 +296,7 @@ class SoundManager {
       try {
         await audioContext.resume();
       } catch (error) {
-        console.warn("Failed to resume AudioContext:", error);
-        return; 
+        return;
       }
     }
 
@@ -286,8 +309,8 @@ class SoundManager {
       this.pauseBackgroundMusic();
     } else {
       if (this.bgMusicLoaded) {
-        this.resumeBackgroundMusic().catch((error) => {
-          console.warn("Failed to resume background music on unmute:", error);
+        this.resumeBackgroundMusic().catch(() => {
+          // Silently handle resume failures
         });
       }
     }
@@ -303,7 +326,7 @@ class SoundManager {
     
     if (this.audioContext) {
       this.audioContext.close().catch((error) => {
-        console.warn("Failed to close audio context:", error);
+        log.warn("Failed to close audio context:", error);
       });
       this.audioContext = null;
     }

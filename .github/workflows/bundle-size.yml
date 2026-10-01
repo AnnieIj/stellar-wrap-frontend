@@ -1,0 +1,79 @@
+name: Bundle Size Tracking
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+jobs:
+  bundle-analyzer:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build with bundle analyzer
+        run: ANALYZE=true pnpm build
+        env:
+          ANALYZE: true
+
+      - name: Upload bundle analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-analysis
+          path: .next/analyze/
+          retention-days: 30
+
+      - name: Comment PR with bundle stats
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '.next/analyze';
+            
+            if (!fs.existsSync(path)) {
+              console.log('No bundle analysis found');
+              return;
+            }
+            
+            const files = fs.readdirSync(path);
+            let comment = '## 📦 Bundle Size Analysis\n\n';
+            
+            files.forEach(file => {
+              if (file.endsWith('.html')) {
+                const filePath = `${path}/${file}`;
+                const stats = fs.statSync(filePath);
+                const sizeKB = (stats.size / 1024).toFixed(2);
+                comment += `- **${file}**: ${sizeKB} KB\n`;
+              }
+            });
+            
+            comment += '\n📊 Download the bundle analysis artifact to view detailed reports.';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo,
+              body: comment
+            });

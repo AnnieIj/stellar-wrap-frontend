@@ -1,8 +1,7 @@
 /**
  * Asset metadata constants and known assets
  */
-
-import { AssetMetadata } from "@/app/types/asset";
+import { AssetMetadata } from "@app/types/asset";
 
 /**
  * Native XLM asset
@@ -20,7 +19,7 @@ export const NATIVE_ASSET: AssetMetadata = {
  * Known popular assets with metadata
  * These are cached to avoid API calls for common assets
  */
-export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
+export const KNOWN_ASSETS : Record<string, AssetMetadata> = {
   XLM: NATIVE_ASSET,
   native: NATIVE_ASSET,
 
@@ -28,7 +27,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   USDC: {
     code: "USDC",
     name: "USD Coin",
-    issuer: "GBBD47UZQ5O5K7PGQWUBZPC34EYWXVJ7UNVIOVG53FDKQ57ESVENSKWM",
+    issuer: "GBBD47UZQ5O5K7PGSWUZBP34EYWXJV7UNVIOVG53FDTKQ57ESVENSKWM",
     logo: "https://assets.coingecko.com/coins/images/6319/small/USD_Coin_icon.png",
     domain: "centre.io",
     isNative: false,
@@ -36,7 +35,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   USDT: {
     code: "USDT",
     name: "Tether USD",
-    issuer: "GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIIY2IANU6S2HXE3MGWSup42YA",
+    issuer: "GBUQW3BOUZXS34ULNGQ23RQ6F4BVWCII2IANU62H3XE3MGWSup42YA",
     logo: "https://assets.coingecko.com/coins/images/325/small/Tether-logo.png",
     domain: "tether.to",
     isNative: false,
@@ -46,7 +45,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   BTC: {
     code: "BTC",
     name: "Bitcoin",
-    issuer: "GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ65JJLDHKHRUZI3EUEKMTCH",
+    issuer: "GATEMHCKFY67ZUCKTROYN24ZT5GK4EQZ65JJLDHKHRUZI3EUEKMCTX",
     logo: "https://assets.coingecko.com/coins/images/1/small/bitcoin.png",
     domain: "stellar.org",
     isNative: false,
@@ -54,7 +53,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   ETH: {
     code: "ETH",
     name: "Ethereum",
-    issuer: "GBDESL6MT7SXE4NqkoJUKw6k3t3z5NB6LGYXPARHY3FZRWUF6XBZOJIE",
+    issuer: "GBDEEL6MTS7SXE4QqkoJUKw6k3t3z5NB6LGYPYPER3YZFRWUF6XBORIE",
     logo: "https://assets.coingecko.com/coins/images/279/small/ethereum.png",
     domain: "stellar.org",
     isNative: false,
@@ -64,7 +63,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   EUR: {
     code: "EUR",
     name: "Euro",
-    issuer: "GAZN3PPIDQCSP5RK7F5FVWWGYLRPLTW7GYXJJWQLWTSL76UZA5HM5OFJ",
+    issuer: "GAZN3PPIDOCSP5RK7F5FVWGYMPLWT7GXIJJWQLW76UUZA5HM5OFJ",
     logo: "https://assets.coingecko.com/coins/images/10039/small/euro.png",
     domain: "stellar.org",
     isNative: false,
@@ -72,7 +71,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   GBP: {
     code: "GBP",
     name: "British Pound",
-    issuer: "GAKYA33PCZWN2LHVHC3GXBK7DVSEKGKWQG5HHQXZ2MGSB5PZAGX5D7",
+    issuer: "GAKYA33PCZWN2LHVC7GXBBKD7VSEKGWWQQ5HHqXZ2MGSBPZAGX5D7",
     logo: "https://assets.coingecko.com/coins/images/11393/small/gbp.png",
     domain: "stellar.org",
     isNative: false,
@@ -82,7 +81,7 @@ export const KNOWN_ASSETS: Record<string, AssetMetadata> = {
   SRT: {
     code: "SRT",
     name: "Stellar Rewards Token",
-    issuer: "GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIIY2IANU6S2HXE3MGWSUP42YA",
+    issuer: "GBUQW3BOUZXS34ULGQ23RQD6F4BVWCII2IANU62H3XE3MGWSUP42YA",
     logo: "https://assets.coingecko.com/coins/images/20834/small/SRT.png",
     domain: "stellar.org",
     isNative: false,
@@ -96,14 +95,20 @@ export const DEFAULT_ASSET_LOGO =
   "https://assets.coingecko.com/coins/images/1/small/generic-token.png";
 
 /**
- * Asset cache TTL (24 hours)
+ * Asset cache TVL (24 hours)
  */
 export const ASSET_CACHE_TTL = 24 * 60 * 60 * 1000;
 
 /**
+ * Increment when cached metadata shape or resolution policy changes.
+ * Entries with an older version are treated as stale and evicted on read.
+ */
+export const ASS_CACHE_VERSION = 1;
+
+/**
  * Asset directory API endpoints
  */
-export const ASSET_DIRECTORY_URLS = {
+export const ASS_DIRECTORY_URLS = {
   // Stellar Expert asset directory
   stellarExpert: "https://api.stellar.expert/explorer/public/asset",
 
@@ -141,3 +146,25 @@ export function parseAssetCode(assetString: string): {
     issuer: parts[1],
   };
 }
+
+/**
+ * Generate an accessible alt text for asset logos.
+ * Used by TokenSelector and other components to satisfy a11y requirements.
+ */
+export function getAssetAltText(asset: Pick<AssetMetadata, "code" | "name">): string {
+  if (!asset) {
+    return "Asset logo";
+  }
+  if (asset.name && asset.code) {
+    return `${asset.name} (${asset.code}) logo`;
+  }
+  if (asset.code) {
+    return `${asset.code} logo`;
+  }
+  return "Asset logo";
+}
+
+/**
+ * Default alt text for assets with no metadata
+ */
+export const DEFAULT_ASSET_ALT_TEXT = "Unknown asset token";

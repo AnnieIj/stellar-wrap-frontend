@@ -12,12 +12,24 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
+  // Jest is the single runner for the unit and integration suites.
+  // The former Vitest suites (test:integration, test:hooks) now run here too,
+  // so this config is the one place that defines the test surface.
   testMatch: [
-    '**/__tests__/**/*.[jt]s?(x)',
-    '**/?(*.)+(spec|test).[jt]s?(x)',
+    '<rootDir>/__tests__/**/*.[jt]s?(x)',
+    '**/__tests__/**/*.test.[jt]s?(x)',
+    '!**/__tests__/**/*.comprehensive.test.ts',
+    '!**/__tests__/**/*.edge.test.ts',
   ],
+  collectCoverage: true,
+  coverageReporters: ['text', 'html'],
+  coverageDirectory: './coverage',
   collectCoverageFrom: [
     'src/services/**/*.{js,jsx,ts,tsx}',
+    'app/components/Footer.tsx',
+    'app/components/Pagination.tsx',
+    'app/components/paginationStore.ts',
+    'app/components/usePaginationController.ts',
     '!src/services/**/__tests__/**',
     '!src/services/**/types.ts',
     '!**/*.d.ts',

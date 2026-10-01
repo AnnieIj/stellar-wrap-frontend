@@ -1,11 +1,14 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Home } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useRef, KeyboardEvent } from "react";
+import { useState, useEffect, lazy, Suspense, KeyboardEvent } from "react";
 import { useSound } from "../hooks/useSound";
 import { SOUND_NAMES } from "../utils/soundManager";
+
+const HomeIcon = lazy(() => import("lucide-react/icons/home"));
+
+const ArrowRightIcon = lazy(() => import("lucide-react/icons/arrow-right"));
 
 interface ProgressIndicatorProps {
   currentStep: number;
@@ -25,6 +28,15 @@ const DEFAULT_ROUTES = [
   "/share", // Step 6: Share
 ];
 
+const STEP_LABELS = [
+  "Landing",
+  "Connect wallet",
+  "Loading wrap",
+  "Vibe check",
+  "Persona reveal",
+  "Share wrap",
+];
+
 export function ProgressIndicator({
   currentStep,
   totalSteps,
@@ -32,33 +44,40 @@ export function ProgressIndicator({
   showNext = false,
   routes,
 }: ProgressIndicatorProps) {
-   const router = useRouter();
-   const routeMap = routes || DEFAULT_ROUTES;
-   const [isMobile, setIsMobile] = useState(false);
-  const stepRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const router = useRouter();
+  const routeMap = routes || DEFAULT_ROUTES;
+  const [isMobile, setIsMobile] = useState(false);
   const { playSound } = useSound();
+  const currentStepLabel = STEP_LABELS[currentStep - 1] ?? `Step ${currentStep}`;
 
   useEffect(() => {
-     if (typeof window === "undefined") return;
-     const checkMobile = () => setIsMobile(window.innerWidth < 768);
-     checkMobile();
-     window.addEventListener("resize", checkMobile);
-     return () => window.removeEventListener("resize", checkMobile);
-   }, []);
+    if (typeof window === "undefined") return;
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
-  // Focus management for keyboard navigation
   useEffect(() => {
-    // Focus the current step indicator on mount
-    if (stepRefs.current[currentStep - 1]) {
-      stepRefs.current[currentStep - 1]?.focus();
-    }
+    const id = window.setTimeout(() => {
+      const heading = document.querySelector<HTMLElement>(
+        '[data-story-heading="true"], h1, h2, h3',
+      );
+      if (!heading) return;
+      if (!heading.hasAttribute("tabindex")) {
+        heading.setAttribute("tabindex", "-1");
+      }
+      heading.focus({ preventScroll: true });
+    }, 100);
+
+    return () => window.clearTimeout(id);
   }, [currentStep]);
 
-  const handleStepNavigation = (direction: 'left' | 'right') => {
-    if (direction === 'left' && currentStep > 1) {
+  const handleStepNavigation = (direction: "left" | "right") => {
+    if (direction === "left" && currentStep > 1) {
       const prevRoute = routeMap[currentStep - 2];
       if (prevRoute) router.push(prevRoute);
-    } else if (direction === 'right' && currentStep < totalSteps) {
+    } else if (direction === "right" && currentStep < totalSteps) {
       const nextRoute = routeMap[currentStep];
       if (nextRoute) {
         playSound(SOUND_NAMES.SLIDE_WHOOSH);
@@ -67,10 +86,14 @@ export function ProgressIndicator({
     }
   };
 
-  const handleStepKeyDown = (event: KeyboardEvent, stepIndex: number, route?: string) => {
+  const handleStepKeyDown = (
+    event: KeyboardEvent,
+    stepIndex: number,
+    route?: string,
+  ) => {
     switch (event.key) {
-      case 'Enter':
-      case ' ':
+      case "Enter":
+      case " ":
         event.preventDefault();
         if (route && stepIndex + 1 !== currentStep) {
           if (stepIndex + 1 > currentStep) {
@@ -79,22 +102,22 @@ export function ProgressIndicator({
           router.push(route);
         }
         break;
-      case 'ArrowLeft':
+      case "ArrowLeft":
         event.preventDefault();
-        handleStepNavigation('left');
+        handleStepNavigation("left");
         break;
-      case 'ArrowRight':
+      case "ArrowRight":
         event.preventDefault();
         if (route && stepIndex + 1 > currentStep) {
           playSound(SOUND_NAMES.SLIDE_WHOOSH);
         }
-        handleStepNavigation('right');
+        handleStepNavigation("right");
         break;
-      case 'Home':
+      case "Home":
         event.preventDefault();
-        router.push('/');
+        router.push("/");
         break;
-      case 'End':
+      case "End":
         event.preventDefault();
         const lastRoute = routeMap[routeMap.length - 1];
         if (lastRoute) router.push(lastRoute);
@@ -103,14 +126,14 @@ export function ProgressIndicator({
   };
 
   const handleHomeKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      router.push('/');
+      router.push("/");
     }
   };
 
   const handleNextKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onNext?.();
     }
@@ -136,26 +159,37 @@ export function ProgressIndicator({
           className="flex items-center gap-2 px-3 py-2 md:px-4 md:py-3 rounded-xl backdrop-blur-xl border border-white/20"
           style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
         >
-          <Home className="w-4 h-4 md:w-5 md:h-5 text-white/80 group-hover:text-white transition-colors" />
+          <Suspense fallback={<div className="w-4 h-4 md:w-5 md:h-5" aria-hidden="true" />}>
+            <HomeIcon
+              className="w-4 h-4 md:w-5 md:h-5 text-white/80 group-hover:text-white transition-colors"
+              aria-hidden="true"
+            />
+          </Suspense>
           <span className="text-xs md:text-sm font-black text-white/80 group-hover:text-white transition-colors hidden sm:inline">
             HOME
           </span>
         </div>
       </motion.button>
 
-      {/* Progress dots */}
       <div
-        className="absolute top-6 md:top-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 md:gap-3"
+        className="sr-only"
         role="progressbar"
         aria-valuenow={currentStep}
         aria-valuemin={1}
         aria-valuemax={totalSteps}
-        aria-label={`Progress: step ${currentStep} of ${totalSteps}`}
+        aria-label={`Story progress: ${currentStepLabel}, step ${currentStep} of ${totalSteps}`}
+      />
+
+      <div
+        className="absolute top-6 md:top-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 md:gap-3"
+        role="navigation"
+        aria-label={`Story steps. Current step: ${currentStepLabel}, ${currentStep} of ${totalSteps}`}
       >
         {[...Array(totalSteps)].map((_, index) => {
           const stepNumber = index + 1;
           const route = routeMap[index];
           const isClickable = route && stepNumber !== currentStep;
+          const stepLabel = STEP_LABELS[index] ?? `Step ${stepNumber}`;
 
           const handleClick = () => {
             if (isClickable && route) {
@@ -170,9 +204,6 @@ export function ProgressIndicator({
           return (
             <motion.button
               key={index}
-              ref={(el) => {
-                stepRefs.current[index] = el;
-              }}
               onClick={handleClick}
               onKeyDown={(e) => handleStepKeyDown(e, index, route)}
               disabled={!isClickable}
@@ -184,8 +215,14 @@ export function ProgressIndicator({
               whileTap={isClickable ? { scale: 0.9 } : {}}
               tabIndex={0}
               role="button"
-              aria-label={route && isClickable ? `Go to step ${stepNumber}` : stepNumber === currentStep ? `Current step: ${stepNumber}` : `Step ${stepNumber}`}
-              aria-current={stepNumber === currentStep ? 'step' : undefined}
+              aria-label={
+                route && isClickable
+                  ? `Go to ${stepLabel}, step ${stepNumber}`
+                  : stepNumber === currentStep
+                    ? `Current step: ${stepLabel}, step ${stepNumber}`
+                    : `${stepLabel}, step ${stepNumber}`
+              }
+              aria-current={stepNumber === currentStep ? "step" : undefined}
               aria-disabled={!isClickable}
             >
               {/* Active indicator */}
@@ -264,23 +301,25 @@ export function ProgressIndicator({
                 borderColor: "rgba(255, 255, 255, 0.3)",
               }}
             >
-              <svg
-                className="w-6 h-6 md:w-7 md:h-7"
-                viewBox="0 0 24 24"
-                fill="none"
+              <Suspense
+                fallback={<div className="w-6 h-6 md:w-7 md:h-7" aria-hidden="true" />}
               >
-                <path
-                  d="M9 18l6-6-6-6"
-                  stroke="white"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <ArrowRightIcon
+                  className="w-6 h-6 md:w-7 md:h-7 text-white"
+                  strokeWidth={2.5}
+                  aria-hidden="true"
                 />
-              </svg>
+              </Suspense>
             </div>
           </div>
         </motion.button>
       )}
+
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {`${currentStepLabel}. Step ${currentStep} of ${totalSteps}.`}
+      </div>
     </>
   );
 }
+
+export default ProgressIndicator;

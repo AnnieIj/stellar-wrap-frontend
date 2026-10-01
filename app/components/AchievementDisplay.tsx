@@ -6,12 +6,14 @@
  * Integrates with asset resolver to show proper asset names and logos
  */
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { IndexerResult } from "@/app/utils/indexer";
-import { AssetMetadata } from "@/app/types/asset";
-import { resolveAsset } from "@/app/services/assetResolver";
+import { useAssetQuery } from "@/app/hooks/useAssetQuery";
 import { AssetDisplay, AssetBadge } from "./AssetDisplay";
 import { Sparkles } from "lucide-react";
+import { logger } from "@/app/utils/logger";
+
+const log = logger.child("AchievementDisplay");
 
 interface AchievementDisplayProps {
   result: IndexerResult | null;
@@ -25,27 +27,9 @@ export const AchievementDisplay: React.FC<AchievementDisplayProps> = ({
   result,
   loading = false,
 }) => {
-  const [mostActiveAssetMetadata, setMostActiveAssetMetadata] =
-    useState<AssetMetadata | null>(null);
-  const [resolving, setResolving] = useState(false);
-
-  useEffect(() => {
-    if (!result || !result.mostActiveAsset) return;
-
-    const resolveMostActiveAsset = async () => {
-      setResolving(true);
-      try {
-        const metadata = await resolveAsset(result.mostActiveAsset);
-        setMostActiveAssetMetadata(metadata);
-      } catch (error) {
-        console.error("Failed to resolve most active asset:", error);
-      } finally {
-        setResolving(false);
-      }
-    };
-
-    resolveMostActiveAsset();
-  }, [result]);
+  const { data: mostActiveAssetMetadata, isLoading: resolving } = useAssetQuery(
+    result?.mostActiveAsset ?? "",
+  );
 
   if (loading || !result) {
     return (
@@ -59,10 +43,10 @@ export const AchievementDisplay: React.FC<AchievementDisplayProps> = ({
   return (
     <div className="space-y-4">
       {/* Most Active Asset */}
-      <div className="rounded-lg bg-linear-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
-          <Sparkles className="w-4 h-4" />
-          Most Active Asset
+      <div className="rounded-lg bg-linear-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 p-3 sm:p-4 overflow-hidden">
+        <h3 className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 shrink-0" />
+          <span className="truncate">Most Active Asset</span>
         </h3>
         {resolving ? (
           <div className="flex items-center gap-2 animate-pulse">
@@ -89,20 +73,20 @@ export const AchievementDisplay: React.FC<AchievementDisplayProps> = ({
       </div>
 
       {/* Additional Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg bg-gray-100 dark:bg-gray-800 p-3">
-          <p className="text-xs text-gray-600 dark:text-gray-400 font-semibold">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+        <div className="rounded-lg bg-gray-100 dark:bg-gray-800 p-2 sm:p-3 overflow-hidden">
+          <p className="text-xs font-semibold text-gray-600 dark:text-gray-400">
             TRANSACTIONS
           </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white break-words">
             {result.totalTransactions}
           </p>
         </div>
-        <div className="rounded-lg bg-gray-100 dark:bg-gray-800 p-3">
-          <p className="text-xs text-gray-600 dark:text-gray-400 font-semibold">
+        <div className="rounded-lg bg-gray-100 dark:bg-gray-800 p-2 sm:p-3 overflow-hidden">
+          <p className="text-xs font-semibold text-gray-600 dark:text-gray-400">
             VOLUME
           </p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-white">
+          <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-white break-words">
             {result.totalVolume.toFixed(0)}
           </p>
         </div>
@@ -110,11 +94,11 @@ export const AchievementDisplay: React.FC<AchievementDisplayProps> = ({
 
       {/* Contract Calls */}
       {result.contractCalls > 0 && (
-        <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 p-3">
-          <p className="text-xs text-gray-600 dark:text-gray-400 font-semibold">
+        <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 p-2 sm:p-3 overflow-hidden">
+          <p className="text-xs font-semibold text-gray-600 dark:text-gray-400">
             CONTRACT CALLS
           </p>
-          <p className="text-xl font-bold text-purple-900 dark:text-purple-300">
+          <p className="text-lg sm:text-xl font-bold text-purple-900 dark:text-purple-300 break-words">
             {result.contractCalls}
           </p>
         </div>
@@ -131,19 +115,21 @@ export const MostActiveAssetCard: React.FC<{
   issuer?: string;
 }> = ({ code, issuer }) => {
   return (
-    <div className="rounded-xl bg-linear-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 p-6">
-      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+    <div className="rounded-xl bg-linear-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 p-4 sm:p-6 overflow-hidden">
+      <p className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 sm:mb-3">
         Your Most Active Asset
       </p>
-      <AssetDisplay
-        code={code}
-        issuer={issuer}
-        showLogo={true}
-        showCode={true}
-        showFullName={true}
-        size="lg"
-        className="text-xl"
-      />
+      <div className="overflow-hidden">
+        <AssetDisplay
+          code={code}
+          issuer={issuer}
+          showLogo={true}
+          showCode={true}
+          showFullName={true}
+          size="lg"
+          className="text-lg sm:text-xl break-words"
+        />
+      </div>
     </div>
   );
 };
