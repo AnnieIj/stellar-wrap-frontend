@@ -6,7 +6,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, kvSAdd, kvSRem, SUB_KEY, PERIOD_KEY } from "../_lib/kv";
+// KV_FAILURE: LOUD — a failed write means the pending subscription was not
+// saved and no confirmation email will be sent; error propagates.
+import { kvGet, kvSet, SUB_KEY } from "../_lib/kv";
 import { sendEmail } from "../_lib/email";
 import { logger } from "@/app/utils/logger";
 

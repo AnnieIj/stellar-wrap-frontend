@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+// KV_FAILURE: LOUD — a failed read or write means the subscription was not
+// persisted; the error propagates so the client can retry.
 import { kvGet, kvSet, kvSAdd, kvSRem, SUB_KEY, PERIOD_KEY } from "../_lib/kv";
 import { logger } from "@/app/utils/logger";
 import {
