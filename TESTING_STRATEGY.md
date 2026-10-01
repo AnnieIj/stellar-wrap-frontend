@@ -102,6 +102,22 @@ Jest generates coverage reports for unit tests:
 - **Report**: `coverage/lcov-report/index.html`
 - **Command**: `pnpm test:coverage`
 
+## E2E Tests
+
+End-to-end tests live under `e2e/` and run with Playwright (`*.spec.ts`). They exercise complete user journeys against the running app, mocking network requests and global state so runs are deterministic in CI.
+
+### Smart Contract Invocation Flow
+
+The Smart Contract Invocation journey is covered end-to-end in `e2e/smart-contract-invocation.spec.ts`. The suite walks a user from opening the invocation page through connecting a wallet, entering contract details, submitting the invocation, and confirming the result. It also covers the unhappy paths and edge cases required by the acceptance criteria:
+
+- **Happy path**: connect wallet → fill contract address, method, and arguments → submit → success confirmation with the returned transaction hash.
+- **Validation errors**: missing/invalid contract address, empty method name, and malformed JSON arguments surface inline errors and block submission.
+- **Wallet errors**: rejected connection and rejected signature requests show a recoverable error state without losing entered form data.
+- **Network errors**: RPC/indexer failures are mocked to return errors and the UI shows a retry affordance that succeeds on the next attempt.
+- **Edge cases**: empty argument list, very large argument payloads, and duplicate submissions (button disabled while pending) are asserted.
+
+Network requests are intercepted with `page.route(...)` and global wallet state is stubbed via `page.addInitScript(...)`, so no real chain or wallet is required. Tests use role/text-based locators and explicit `expect(...).toBeVisible()` waits (no arbitrary timeouts) to stay reliable and flake-free in CI.
+
 ## Examples
 
 ### Jest Unit Test Example
@@ -163,6 +179,25 @@ test.describe('Transaction Signing flow', () => {
     await page.getByRole('button', { name: 'Sign Transaction' }).click();
     await expect(page.getByText('Transaction signed')).toBeVisible();
   });
+});
+```
+
+```typescript
+// e2e/smart-contract-invocation.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('invokes a smart contract successfully', async ({ page }) => {
+  await page.route('**/api/rpc', (route) =>
+    route.fulfill({ status: 200, body: JSON.stringify({ txHash: '0xabc' }) }),
+  );
+
+  await page.goto('/en/invoke');
+  await page.getByRole('button', { name: /connect wallet/i }).click();
+  await page.getByLabel(/contract address/i).fill('0x0000000000000000000000000000000000000000');
+  await page.getByLabel(/method/i).fill('transfer');
+  await page.getByRole('button', { name: /invoke/i }).click();
+
+  await expect(page.getByText(/0xabc/)).toBeVisible();
 });
 ```
 

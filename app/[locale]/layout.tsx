@@ -32,6 +32,10 @@ export default async function LocaleLayout({ children, params }: Props) {
   return (
     <html lang={locale}>
       <head>
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
         {plausibleDomain && (
           <Script
             strategy="afterInteractive"
@@ -40,14 +44,16 @@ export default async function LocaleLayout({ children, params }: Props) {
           />
         )}
       </head>
-      <body>
+      <body className="min-h-screen overflow-x-hidden antialiased">
         <SkipNavigation />
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider>
             {" "}
             {/* <-- Wrap here so everything inside has access to useTheme */}
             <GlobalToaster />
-            {children}
+            <main className="mx-auto w-full max-w-screen-xl px-4 sm:px-6 lg:px-8">
+              {children}
+            </main>
             <Footer />
           </ThemeProvider>
         </NextIntlClientProvider>

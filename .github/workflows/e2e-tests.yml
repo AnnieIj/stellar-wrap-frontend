@@ -33,7 +33,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
@@ -62,6 +62,51 @@ jobs:
         if: always()
         with:
           name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
+
+  smart-contract-invocation:
+    name: Playwright E2E - Smart Contract Invocation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Validate environment variables
+        run: node scripts/validate-env.js
+
+      - name: Run Smart Contract Invocation E2E tests
+        # Scoped to the Smart Contract Invocation spec so the critical journey
+        # is exercised end-to-end (happy path, error states, edge cases) with
+        # CI retries + single worker for flake-free runs.
+        run: pnpm exec playwright test e2e/smart-contract-invocation.spec.ts
+        env:
+          CI: "true"
+
+      - name: Upload Smart Contract Invocation report & traces
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-smart-contract-invocation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             playwright-report/
             test-results/

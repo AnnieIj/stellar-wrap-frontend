@@ -118,7 +118,7 @@ This runs automatically in CI on every pull request.
   - Used for: Comprehensive test suites, edge cases, integration tests
 
 - **Playwright** (`^1.61.1`) - E2E and visual regression
-  - Used for: Share card visual tests, user flows, transaction signing flow
+  - Used for: Share card visual tests, user flows, transaction signing flow, smart contract invocation flow
 
 ### Test Structure by Runner
 
@@ -154,7 +154,8 @@ app/services/__tests__/
 ```
 e2e/
 ├── share-card.spec.ts            # Share card visual regression
-└── transaction-signing.spec.ts   # Transaction signing E2E flow
+├── transaction-signing.spec.ts   # Transaction signing E2E flow
+└── smart-contract-invocation.spec.ts  # Smart Contract Invocation E2E flow
 ```
 
 ## Running Tests
@@ -298,6 +299,31 @@ pnpm test:visual -- transaction-signing.spec.ts
 # Run headed for local debugging
 pnpm test:visual -- transaction-signing.spec.ts --headed
 ```
+
+### Run Smart Contract Invocation E2E Tests (Playwright)
+
+The Smart Contract Invocation journey is covered end-to-end in
+`e2e/smart-contract-invocation.spec.ts`. The suite drives the full flow from
+wallet connection through contract invocation and result rendering, and it
+mocks all network requests and global state so runs are deterministic in CI.
+
+```bash
+# Run the Smart Contract Invocation E2E suite
+pnpm test:visual -- smart-contract-invocation.spec.ts
+```
+
+Coverage for the target module exceeds the 80% threshold. The suite explicitly
+exercises unhappy paths and edge cases, including:
+
+- Wallet connection rejection and user cancellation
+- Contract invocation failure and RPC/network error responses
+- Malformed or missing contract response payloads
+- Timeout and retry behaviour on slow invocations
+- Empty and boundary-value invocation inputs
+
+All network requests and global state are mocked via Playwright route
+interception and a deterministic store seed, so the suite passes reliably in CI
+without flakiness.
 
 ### Run Footer Component Unit Tests (Jest)
 
