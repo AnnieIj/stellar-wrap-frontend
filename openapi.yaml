@@ -236,6 +236,92 @@ paths:
                 type: string
                 example: "Failed to generate the image"
 
+  /api/og/twitter:
+    get:
+      operationId: getTwitterOgImage
+      summary: Generate a 1200 × 600 PNG share card for Twitter/X
+      description: |
+        Runs on **Vercel Edge Runtime** and returns a binary PNG image
+        (1200 × 600 px) optimized for Twitter/X social media cards.
+
+        **Cache**: `Cache-Control: public, s-maxage=86400, stale-while-revalidate=604800`
+        — the CDN caches the image for 24 hours and can serve stale content for
+        up to 7 days while revalidating in the background.
+
+        Twitter/X recommends 1200 × 600 for summary_large_image cards, so this
+        endpoint uses a landscape layout optimized for that aspect ratio.
+      parameters:
+        - name: username
+          in: query
+          required: false
+          description: Stellar username or truncated address shown on the card.
+          schema:
+            type: string
+            default: StellarUser
+            example: "alice.stellar"
+        - name: transactions
+          in: query
+          required: false
+          description: Total transaction count (stringified integer).
+          schema:
+            type: string
+            default: "0"
+            example: "142"
+        - name: persona
+          in: query
+          required: false
+          description: Persona / archetype label displayed on the card.
+          schema:
+            type: string
+            default: "Network Pioneer"
+            example: "The DeFi Patron"
+        - name: topVibe
+          in: query
+          required: false
+          description: Top vibe label (e.g. "Steady", "Power User").
+          schema:
+            type: string
+            default: Steady
+            example: "Power User"
+        - name: vibePercentage
+          in: query
+          required: false
+          description: Percentage for the top vibe (0–100, stringified).
+          schema:
+            type: string
+            default: "0"
+            example: "72"
+        - name: archetypeImage
+          in: query
+          required: false
+          description: |
+            Path to the archetype image relative to the app's public directory.
+            Defaults to a slug derived from the `persona` parameter.
+          schema:
+            type: string
+            example: "/archetypes/defi-patron.png"
+      responses:
+        "200":
+          description: 1200 × 600 PNG share card image for Twitter/X.
+          headers:
+            Cache-Control:
+              description: CDN caching directive.
+              schema:
+                type: string
+                example: "public, s-maxage=86400, stale-while-revalidate=604800"
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "500":
+          description: Image generation failed.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to generate the image"
+
   /api/notifications/subscribe:
     post:
       operationId: subscribePush

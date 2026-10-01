@@ -12,6 +12,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+// KV_FAILURE: LOUD — GDPR deletion must complete reliably; errors propagate
+// so the caller knows the data was not erased and can retry.
+import { kvGet, kvSet, kvDel, kvKeys, SUB_KEY } from "../../_lib/kv";
 import { sendEmail } from "../../_lib/email";
 import {
   deleteNotificationData,
