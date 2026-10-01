@@ -137,10 +137,23 @@ export function ShareCard({
     setDownloadError(null);
     setUsedMainThreadFallback(false);
 
+    const element = shareImageRef.current;
     try {
-      const result = await downloadShareImage(shareImageRef.current, {
-        onFallbackWarning: () => setUsedMainThreadFallback(true),
-        format: cardFormat,
+      // Never throws: falls back native share → download → OG image link.
+      const outcome = await shareImageWithFallback({
+        render: async () => {
+          const result = await renderShareImage(element, {
+            onFallbackWarning: () => setUsedMainThreadFallback(true),
+            format: cardFormat,
+          });
+          log.info(
+            `Share image generated in ${result.durationMs}ms (scale: ${result.scale}x, worker: ${result.usedWorker})`,
+          );
+          return result;
+        },
+        download: downloadImageBlob,
+        preview: { username, transactions, persona, topVibe, vibePercentage },
+        preferNativeShare: isMobileDevice(),
       });
       console.info(
         `Share image generated in ${result.durationMs}ms (scale: ${result.scale}x, worker: ${result.usedWorker})`,

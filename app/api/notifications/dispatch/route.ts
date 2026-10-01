@@ -145,41 +145,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, dispatched: 0, message: "No active periods" });
     }
 
-    // Scan all subscription records
-    const subKeys = await kvKeys("notif:sub:*");
     let dispatched = 0;
+    const dispatchedWallets = new Set<string>();
 
-    for (const key of subKeys) {
-      const record = await kvGet<SubscriptionRecord>(key);
-      if (!record || record.deletionRequested) continue;
+    // Fetch subscribers from the period index for each active period
+    for (const period of activePeriods) {
+      const periodKey = getPeriodKey(period, now);
 
-      for (const period of activePeriods) {
-        const periodKey = getPeriodKey(period, now);
+      // Get all wallets subscribed to this period from the index
+      const wallets = await getWalletsForPeriod(period);
+
+      log.info(`Period ${period}: found ${wallets.length} subscribers in index`);
+
+      for (const walletAddress of wallets) {
+        const record = await kvGet<SubscriptionRecord>(SUB_KEY(walletAddress));
+        if (!record || record.deletionRequested) continue;
 
         // ── Push ──
         if (record.push?.periods[period] && record.push.subscription) {
-          const logKey = LOG_KEY(record.walletAddress, "push", period, periodKey);
+          const logKey = LOG_KEY(walletAddress, "push", period, periodKey);
           const existing = await kvGet<DispatchLogEntry>(logKey);
 
           if (!existing) {
             let status: "sent" | "failed" = "sent";
             let attempts = 1;
+            let error: string | undefined;
 
             try {
-              await sendPushNotification(record.push.subscription, record.walletAddress, period);
-            } catch {
+              await sendPushNotification(record.push.subscription, walletAddress, period);
+            } catch (err) {
               status = "failed";
               attempts = 4; // 1 initial + 3 retries
+              error = err instanceof Error ? err.message : String(err);
             }
 
             const logEntry: DispatchLogEntry = {
-              walletAddress: record.walletAddress,
+              walletAddress,
               channel: "push",
               period,
               periodKey,
               sentAt: new Date().toISOString(),
               status,
               attempts,
+              ...(error && { error }),
             };
             await kvSet(logKey, logEntry);
             if (status === "sent") dispatched++;
@@ -192,12 +200,13 @@ export async function POST(request: NextRequest) {
           record.email.periods[period] &&
           record.email.address
         ) {
-          const logKey = LOG_KEY(record.walletAddress, "email", period, periodKey);
+          const logKey = LOG_KEY(walletAddress, "email", period, periodKey);
           const existing = await kvGet<DispatchLogEntry>(logKey);
 
           if (!existing) {
             let status: "sent" | "failed" = "sent";
             let attempts = 1;
+            let error: string | undefined;
 
             try {
               await sendEmailNotification(
@@ -205,28 +214,37 @@ export async function POST(request: NextRequest) {
                 record.email.unsubscribeToken,
                 period
               );
-            } catch {
+            } catch (err) {
               status = "failed";
               attempts = 4;
+              error = err instanceof Error ? err.message : String(err);
             }
 
             const logEntry: DispatchLogEntry = {
-              walletAddress: record.walletAddress,
+              walletAddress,
               channel: "email",
               period,
               periodKey,
               sentAt: new Date().toISOString(),
               status,
               attempts,
+              ...(error && { error }),
             };
             await kvSet(logKey, logEntry);
             if (status === "sent") dispatched++;
           }
         }
+
+        dispatchedWallets.add(walletAddress);
       }
     }
 
-    return NextResponse.json({ ok: true, dispatched, periods: activePeriods });
+    return NextResponse.json({
+      ok: true,
+      dispatched,
+      periods: activePeriods,
+      uniqueWallets: dispatchedWallets.size,
+    });
   } catch (err) {
     return internalApiError(log, err);
   }

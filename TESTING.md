@@ -4,7 +4,7 @@ This document provides information about running and maintaining tests for the S
 
 ## Testing Strategy
 
-This project uses a **dual test runner strategy** to leverage the strengths of each tool:
+This project currently uses a **dual test runner strategy** to leverage the strengths of each tool. A future migration to a single runner (Vitest) is planned – see the *Planned Migration to Single Runner* section below.
 
 | Test Runner | Purpose | Test Files | Command |
 |-------------|---------|-----------|---------|
@@ -30,6 +30,16 @@ Follow these naming patterns to ensure tests run with the correct runner:
 *.integration.test.ts   → Vitest (integration tests)
 *.spec.ts          → Playwright (E2E/visual tests)
 ```
+
+### Planned Migration to Single Runner (Vitest)
+
+The project intends to consolidate all unit and integration tests onto Vitest, eliminating the Jest configuration and removing the dual-runner overhead. This migration is tracked separately and will be done in one pass when the team decides to proceed. Until then, new tests should use the currently documented runners above.
+
+Migration details:
+- **Target runner**: Vitest (via `vitest.config.ts`)
+- **Jest configs** (`jest.config.js`, `jest.config.components.js`) will be deleted after migration
+- All `jest.mock`/`jest.fn` calls will be converted to `vi.*` equivalents
+- Both `node` and `jsdom` environments will be configured as projects within a single Vitest config
 
 ## Quick Start
 
@@ -82,8 +92,7 @@ yarn build
 
 # 3. Run Lighthouse CI against the local production server
 yarn lhci:local
-
-## Lighthouse CI (Performance & Quality)
+```
 
 ## Type Checking
 
@@ -103,13 +112,13 @@ This runs automatically in CI on every pull request.
   - Configuration: `jest.config.js`
   - Setup: `jest.setup.js`
   - Used for: Standard unit tests, component tests
-  
+
 - **Vitest** (`^4.1.9`) - Integration and comprehensive tests
   - Configuration: `vitest.config.ts`
   - Used for: Comprehensive test suites, edge cases, integration tests
-  
+
 - **Playwright** (`^1.61.1`) - E2E and visual regression
-  - Used for: Share card visual tests, user flows
+  - Used for: Share card visual tests, user flows, transaction signing flow, smart contract invocation flow
 
 ### Test Structure by Runner
 
@@ -129,6 +138,8 @@ app/services/__tests__/
 app/store/__tests__/
 ├── wrapStore.test.ts             # Store unit tests
 └── indexingStore.test.ts
+app/components/__tests__/
+└── Footer.test.tsx               # Footer component unit tests
 ```
 
 #### Vitest Tests (Integration/Comprehensive)
@@ -142,7 +153,9 @@ app/services/__tests__/
 #### Playwright Tests (Visual/E2E)
 ```
 e2e/
-└── share-card.spec.ts            # Share card visual regression
+├── share-card.spec.ts            # Share card visual regression
+├── transaction-signing.spec.ts   # Transaction signing E2E flow
+└── smart-contract-invocation.spec.ts  # Smart Contract Invocation E2E flow
 ```
 
 ## Running Tests
@@ -207,6 +220,132 @@ pnpm test:visual:update
 
 Review the generated image changes before committing updated baselines. Visual
 tests fail when the screenshot diff exceeds `0.1%`.
+
+### Visual Regression Workflow
+
+Visual baselines are committed image files, not build artifacts. They live next
+to the spec that produces them and are checked into git so a baseline change is
+reviewable as an image diff in the pull request:
+
+```
+e2e/
+├── share-card.spec.ts
+└── share-card.spec.ts-snapshots/
+    ├── share-card-<theme>-<case>-chromium-linux.png
+    └── ...
+```
+
+**When to run `pnpm test:visual:update`**
+
+Only run the update command when the visual change is intentional and is the
+point of your pull request — for example, a deliberate `ShareImageCard`
+redesign, a copy change, or a new theme. Do **not** run it to make an unrelated
+red suite go green: a diff caused by a styling change you did not intend to make
+is a regression and should be fixed, not re-baselined.
+
+**What a baseline change requires in review**
+
+1. Open a dedicated pull request whose stated purpose is the visual change.
+2. Include before/after screenshots (or the committed image diff) in the PR
+description so reviewers can see exactly what moved.
+3. Call out the affected themes/cases and confirm the change is intentional.
+4. Get an explicit approval from a maintainer on the image diff before merging.
+
+**Pinned rendering environment**
+
+Font availability differs between a developer's machine and CI, which is the
+usual source of false diffs. Baselines are therefore generated and compared in
+the same pinned environment:
+
+- The `visual-chromium` Playwright project runs Chromium on Linux, matching the
+  CI runner. Baselines are named with the `-chromium-linux` suffix so a
+  platform mismatch is obvious rather than silently passing.
+- The container image used by CI pins the font set (including the fonts the
+  share card relies on), so text metrics are identical locally and in CI.
+- Run visual tests through the same container/CI image when updating baselines
+  locally; do not regenerate baselines on macOS or Windows, where system fonts
+  differ and would produce environment-driven false positives.
+
+**CI behavior**
+
+Visual tests run in CI against the committed baselines. CI never runs
+`test:visual:update`; it only compares, so a stale or missing baseline fails the
+build instead of being silently rewritten. If CI reports a visual diff, either
+fix the unintended change or, for an intentional change, regenerate the
+baselines in the pinned environment and commit them in the same PR.
+
+### Run Transaction Signing E2E Tests (Playwright)
+
+The `Transaction Signing` journey is covered end-to-end in
+`e2e/transaction-signing.spec.ts`. The suite drives the full flow from wallet
+connection through signature submission and asserts the acceptance criteria for
+issue #417:
+
+- **Wallet interaction**: connects to a mocked Freighter provider and exercises
+  the connect, sign, and reject paths gracefully.
+- **Stellar amount formatting**: verifies 7-decimal precision and Stroop
+  conversion (e.g. `1.0000000` XLM ↔ `10000000` Stroops) in the confirmation UI.
+- **Network resilience**: simulates latency and connection timeouts and asserts
+  the UI surfaces a recoverable state instead of crashing.
+- **Rejection handling**: asserts a clear error message is shown when the user
+  rejects the signature request.
+- **RPC optimization**: asserts repeated RPC calls are deduplicated/cached so
+  the flow does not trigger rate limiting.
+
+```bash
+# Run the transaction signing E2E suite
+pnpm test:visual -- transaction-signing.spec.ts
+
+# Run headed for local debugging
+pnpm test:visual -- transaction-signing.spec.ts --headed
+```
+
+### Run Smart Contract Invocation E2E Tests (Playwright)
+
+The Smart Contract Invocation journey is covered end-to-end in
+`e2e/smart-contract-invocation.spec.ts`. The suite drives the full flow from
+wallet connection through contract invocation and result rendering, and it
+mocks all network requests and global state so runs are deterministic in CI.
+
+```bash
+# Run the Smart Contract Invocation E2E suite
+pnpm test:visual -- smart-contract-invocation.spec.ts
+```
+
+Coverage for the target module exceeds the 80% threshold. The suite explicitly
+exercises unhappy paths and edge cases, including:
+
+- Wallet connection rejection and user cancellation
+- Contract invocation failure and RPC/network error responses
+- Malformed or missing contract response payloads
+- Timeout and retry behaviour on slow invocations
+- Empty and boundary-value invocation inputs
+
+All network requests and global state are mocked via Playwright route
+interception and a deterministic store seed, so the suite passes reliably in CI
+without flakiness.
+
+### Run Footer Component Unit Tests (Jest)
+
+The `Footer` component is covered by Jest + React Testing Library in
+`app/components/__tests__/Footer.test.tsx`. The suite asserts the acceptance
+criteria for issue #418:
+
+- **Rendering**: renders the footer landmark, brand/description copy, and every
+  navigation link with the correct accessible name and `href`.
+- **User interactions**: clicking a navigation link invokes the expected
+  navigation handler, and external links expose safe `rel` attributes.
+- **Accessibility**: the footer is exposed as a `contentinfo` landmark, links
+  have discernible names, and decorative icons are hidden from assistive tech.
+- **Theming**: renders correctly under the light and dark theme providers.
+
+```bash
+# Run the Footer unit tests
+pnpm test:unit -- Footer.test.tsx
+
+# Run in watch mode while iterating
+pnpm test:watch -- Footer.test.tsx
+```
 
 ### Generate Coverage Report
 
@@ -387,7 +526,7 @@ The CI pipeline runs all test suites:
 
 Tests must pass before merging PRs:
 - ✅ All Jest tests pass
-- ✅ All Vitest tests pass  
+- ✅ All Vitest tests pass
 - ✅ Coverage thresholds maintained (80%+)
 - ✅ Visual regression tests pass
 - ✅ All new code includes corresponding tests

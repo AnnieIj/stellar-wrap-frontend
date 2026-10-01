@@ -56,7 +56,10 @@ const faqJsonLd = {
 
 export default function Home() {
   return (
-    <main id="main-content">
+    <main
+      id="main-content"
+      className="w-full max-w-full overflow-x-hidden px-4 sm:px-6 lg:px-8"
+    >
       <JsonLd data={faqJsonLd} />
       <LandingPage />
     </main>
