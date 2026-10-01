@@ -24,6 +24,24 @@ async function removeFromPeriodIndexes(walletAddress: string) {
   await Promise.all(ops);
 }
 
+async function removeEmailPeriodIndexes(walletAddress: string, record: SubscriptionRecord) {
+  // Only remove from period index if push is not subscribed to those periods
+  const emailPeriods = record.email?.periods;
+  const pushPeriods = record.push?.periods;
+  
+  if (!emailPeriods) return;
+  
+  const ops = VALID_PERIODS.map((period) => {
+    // Only remove if email was subscribed but push is not
+    if (emailPeriods[period] && !pushPeriods?.[period]) {
+      return kvSRem(PERIOD_KEY(period), walletAddress);
+    }
+    return Promise.resolve();
+  });
+  
+  await Promise.all(ops);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const ipDenial = rateLimitDenialResponse(
@@ -68,6 +86,10 @@ export async function POST(request: NextRequest) {
         const record = await kvGet<SubscriptionRecord>(key);
         if (record?.email?.unsubscribeToken === body.token) {
           const walletAddress = record.walletAddress;
+          
+          // Remove email period indexes before updating record
+          await removeEmailPeriodIndexes(walletAddress, record);
+          
           const updated: SubscriptionRecord = { ...record, email: undefined };
           await kvSet(key, updated);
           return NextResponse.json({ ok: true }, { status: 200 });
@@ -82,13 +104,30 @@ export async function POST(request: NextRequest) {
         return apiError("NOT_FOUND", "No subscription found", 404);
       }
 
-      const updated: SubscriptionRecord =
-        body.channel === "push" ? { ...record, push: undefined } : { ...record, email: undefined };
-
-      await kvSet(SUB_KEY(body.walletAddress), updated);
-
       if (body.channel === "push") {
-        await removeFromPeriodIndexes(body.walletAddress);
+        // Remove push-specific period indexes
+        const pushPeriods = record.push?.periods;
+        const emailPeriods = record.email?.periods;
+        
+        if (pushPeriods) {
+          const ops = VALID_PERIODS.map((period) => {
+            // Only remove if push was subscribed but email is not
+            if (pushPeriods[period] && !emailPeriods?.[period]) {
+              return kvSRem(PERIOD_KEY(period), body.walletAddress!);
+            }
+            return Promise.resolve();
+          });
+          await Promise.all(ops);
+        }
+        
+        const updated: SubscriptionRecord = { ...record, push: undefined };
+        await kvSet(SUB_KEY(body.walletAddress), updated);
+      } else {
+        // Remove email-specific period indexes
+        await removeEmailPeriodIndexes(body.walletAddress, record);
+        
+        const updated: SubscriptionRecord = { ...record, email: undefined };
+        await kvSet(SUB_KEY(body.walletAddress), updated);
       }
 
       return NextResponse.json({ ok: true }, { status: 200 });

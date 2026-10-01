@@ -86,6 +86,18 @@ export async function kvSRem(key: string, member: string): Promise<void> {
   await kv.srem(key, member);
 }
 
+export async function kvSMembers(key: string): Promise<string[]> {
+  const kv = await getKv();
+  if (kv === localKv) {
+    const existing = store.get(key);
+    if (existing instanceof Set) {
+      return Array.from(existing);
+    }
+    return [];
+  }
+  return kv.smembers(key);
+}
+
 export function kvReset(): void {
   store.clear();
 }

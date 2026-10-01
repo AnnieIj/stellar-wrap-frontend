@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, SUB_KEY } from "../_lib/kv";
+import { kvGet, kvSet, kvSAdd, kvSRem, SUB_KEY, PERIOD_KEY } from "../_lib/kv";
 import { sendEmail } from "../_lib/email";
 import { logger } from "@/app/utils/logger";
 
@@ -24,6 +24,30 @@ import { isValidEmail } from "@/app/utils/notifications/emailValidator";
 import { generateUnsubscribeToken } from "@/app/utils/notifications/unsubscribeToken";
 import type { SubscriptionRecord, PeriodPrefs } from "@/app/types/notifications";
 import { apiError, internalApiError } from "@/app/api/_lib/apiError";
+
+const VALID_PERIODS = ["weekly", "monthly", "yearly"] as const;
+
+async function syncPeriodIndex(
+  walletAddress: string,
+  previousPeriods: PeriodPrefs | undefined,
+  currentPeriods: PeriodPrefs
+) {
+  const ops = VALID_PERIODS.map((period) => {
+    const key = PERIOD_KEY(period);
+    const enabled = !!currentPeriods[period];
+    const wasEnabled = !!previousPeriods?.[period];
+
+    if (enabled) {
+      return kvSAdd(key, walletAddress);
+    }
+    if (wasEnabled) {
+      return kvSRem(key, walletAddress);
+    }
+    return Promise.resolve();
+  });
+
+  await Promise.all(ops);
+}
 
 function isValidWallet(address: string): boolean {
   return typeof address === "string" && address.startsWith("G") && address.length === 56;
@@ -97,6 +121,14 @@ export async function POST(request: NextRequest) {
 
     const status = isAlreadyActive ? "active" : "pending";
 
+    const normalizedPeriods: PeriodPrefs = periods ?? {
+      weekly: false,
+      monthly: false,
+      yearly: false,
+    };
+
+    const previousPeriods = existing.email?.periods;
+
     const updated: SubscriptionRecord = {
       ...existing,
       email: {
@@ -104,7 +136,7 @@ export async function POST(request: NextRequest) {
         status,
         confirmationToken,
         unsubscribeToken,
-        periods: periods ?? { weekly: false, monthly: false, yearly: false },
+        periods: normalizedPeriods,
         createdAt:
           isSameEmail && existing.email?.createdAt
             ? existing.email.createdAt
@@ -113,6 +145,9 @@ export async function POST(request: NextRequest) {
     };
 
     await kvSet(SUB_KEY(walletAddress), updated);
+
+    // Update period index
+    await syncPeriodIndex(walletAddress, previousPeriods, normalizedPeriods);
 
     if (!isAlreadyActive) {
       const baseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
