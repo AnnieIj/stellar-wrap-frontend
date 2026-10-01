@@ -9,6 +9,23 @@ const log = logger.child("api:og-twitter");
 
 const CACHE_CONTROL = "public, s-maxage=86400, stale-while-revalidate=604800";
 
+// Supported locales - must match i18n/routing.ts
+const SUPPORTED_LOCALES = ['en', 'es', 'fr'] as const;
+type SupportedLocale = typeof SUPPORTED_LOCALES[number];
+
+const LOCALE_MESSAGES = { en, es, fr } as const;
+
+/**
+ * Validates and returns a supported locale, falling back to 'en' for invalid values.
+ */
+function validateLocale(requestedLocale: string | null): SupportedLocale {
+  if (!requestedLocale) return 'en';
+  const normalized = requestedLocale.toLowerCase().trim();
+  return SUPPORTED_LOCALES.includes(normalized as SupportedLocale)
+    ? (normalized as SupportedLocale)
+    : 'en';
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -120,7 +137,7 @@ export async function GET(req: NextRequest) {
                       marginBottom: "8px",
                     }}
                   >
-                    TRANSACTIONS
+                    {labels.totalTransactions.toUpperCase()}
                   </span>
                   <span style={{ fontSize: "32px", fontWeight: 900, lineHeight: 1 }}>
                     {transactions}
@@ -146,7 +163,7 @@ export async function GET(req: NextRequest) {
                       marginBottom: "8px",
                     }}
                   >
-                    TOP VIBE
+                    {labels.topVibe.toUpperCase()}
                   </span>
                   <span style={{ fontSize: "24px", fontWeight: 900, color: "white" }}>
                     {vibePercentage}% {topVibe}

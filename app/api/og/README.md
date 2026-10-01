@@ -1,13 +1,26 @@
 # Sample OG URLs
 
-## Default
+## Default (English)
 
 /api/og
 
-## Custom
+## With locale
 
-/api/og?username=Alice&transactions=1532&persona=Network%20Pioneer&topVibe=Builder&vibePercentage=91
+/api/og?locale=es
+/api/og?locale=fr
 
-## With archetype image
+## Custom with locale
 
-/api/og?username=Alice&transactions=1532&persona=Network%20Pioneer&topVibe=Builder&vibePercentage=91&archetypeImage=/archetypes/network-pioneer.png
+/api/og?username=Alice&transactions=1532&persona=Network%20Pioneer&topVibe=Builder&vibePercentage=91&locale=es
+
+## With archetype image and locale
+
+/api/og?username=Alice&transactions=1532&persona=Network%20Pioneer&topVibe=Builder&vibePercentage=91&archetypeImage=/archetypes/network-pioneer.png&locale=fr
+
+## Supported locales
+
+- `en` (English, default)
+- `es` (Spanish)
+- `fr` (French)
+
+Invalid or missing locale values default to English.
