@@ -1,0 +1,52 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Horizon } from "@stellar/stellar-sdk";
+
+interface AssetCardProps {
+  publicKey: string;
+}
+
+export function AssetCard({ publicKey }: AssetCardProps) {
+  const [balance, setBalance] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!publicKey) return;
+
+    const fetchXlmBalance = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const server = new Horizon.Server("https://horizon.stellar.org");
+        const account = await server.loadAccount(publicKey);
+        
+        const nativeAsset = account.balances.find(
+          (b) => b.asset_type === "native"
+        );
+
+        setBalance(nativeAsset ? nativeAsset.balance : "0");
+      } catch (err) {
+        console.error("Failed to fetch XLM balance:", err);
+        setError("Unable to load balance");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchXlmBalance();
+  }, [publicKey]);
+
+  return (
+    <div className="p-4 rounded-xl bg-slate-900 text-white border border-slate-800">
+      <h3 className="text-sm font-medium text-slate-400">XLM Balance</h3>
+      {loading && <p className="text-lg font-bold animate-pulse">Loading...</p>}
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      {!loading && !error && (
+        <p className="text-2xl font-bold">{balance} XLM</p>
+      )}
+    </div>
+  );
+}

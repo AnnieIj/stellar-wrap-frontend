@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { kvGet, kvSet, SUB_KEY } from "../_lib/kv";
+import { kvGet, kvSet, kvSAdd, kvSRem, SUB_KEY, PERIOD_KEY } from "../_lib/kv";
 import { sendEmail } from "../_lib/email";
 import { logger } from "@/app/utils/logger";
 
@@ -14,7 +14,7 @@ const log = logger.child("api:subscribe-email");
 import {
   getClientIp,
   checkRateLimit,
-  rateLimitResponse,
+  rateLimitDenialResponse,
   SUBSCRIBE_EMAIL_IP_LIMIT,
   SUBSCRIBE_EMAIL_IP_WINDOW,
   SUBSCRIBE_EMAIL_TARGET_LIMIT,
@@ -25,6 +25,30 @@ import { generateUnsubscribeToken } from "@/app/utils/notifications/unsubscribeT
 import type { SubscriptionRecord, PeriodPrefs } from "@/app/types/notifications";
 import { apiError, internalApiError } from "@/app/api/_lib/apiError";
 
+const VALID_PERIODS = ["weekly", "monthly", "yearly"] as const;
+
+async function syncPeriodIndex(
+  walletAddress: string,
+  previousPeriods: PeriodPrefs | undefined,
+  currentPeriods: PeriodPrefs
+) {
+  const ops = VALID_PERIODS.map((period) => {
+    const key = PERIOD_KEY(period);
+    const enabled = !!currentPeriods[period];
+    const wasEnabled = !!previousPeriods?.[period];
+
+    if (enabled) {
+      return kvSAdd(key, walletAddress);
+    }
+    if (wasEnabled) {
+      return kvSRem(key, walletAddress);
+    }
+    return Promise.resolve();
+  });
+
+  await Promise.all(ops);
+}
+
 function isValidWallet(address: string): boolean {
   return typeof address === "string" && address.startsWith("G") && address.length === 56;
 }
@@ -32,14 +56,16 @@ function isValidWallet(address: string): boolean {
 export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request);
-    const ipLimitResult = await checkRateLimit(
-      `ratelimit:ip:subscribe-email:${ip}`,
-      SUBSCRIBE_EMAIL_IP_LIMIT,
-      SUBSCRIBE_EMAIL_IP_WINDOW
+    const ipDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:ip:subscribe-email:${ip}`,
+        SUBSCRIBE_EMAIL_IP_LIMIT,
+        SUBSCRIBE_EMAIL_IP_WINDOW
+      )
     );
 
-    if (!ipLimitResult.allowed) {
-      return rateLimitResponse(ipLimitResult.resetInSeconds);
+    if (ipDenial) {
+      return ipDenial;
     }
 
     const body = await request.json();
@@ -59,17 +85,19 @@ export async function POST(request: NextRequest) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const emailLimitResult = await checkRateLimit(
-      `ratelimit:email:subscribe-email:${normalizedEmail}`,
-      SUBSCRIBE_EMAIL_TARGET_LIMIT,
-      SUBSCRIBE_EMAIL_TARGET_WINDOW
+    // Keyed on the target address, so the same mailbox cannot be mailed over
+    // and over from a rotating set of source IPs.
+    const emailDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:email:subscribe-email:${normalizedEmail}`,
+        SUBSCRIBE_EMAIL_TARGET_LIMIT,
+        SUBSCRIBE_EMAIL_TARGET_WINDOW
+      ),
+      "Too many requests for this email address. Please try again later."
     );
 
-    if (!emailLimitResult.allowed) {
-      return rateLimitResponse(
-        emailLimitResult.resetInSeconds,
-        "Too many requests for this email address. Please try again later."
-      );
+    if (emailDenial) {
+      return emailDenial;
     }
 
     const existing = (await kvGet<SubscriptionRecord>(SUB_KEY(walletAddress))) ?? {
@@ -93,6 +121,14 @@ export async function POST(request: NextRequest) {
 
     const status = isAlreadyActive ? "active" : "pending";
 
+    const normalizedPeriods: PeriodPrefs = periods ?? {
+      weekly: false,
+      monthly: false,
+      yearly: false,
+    };
+
+    const previousPeriods = existing.email?.periods;
+
     const updated: SubscriptionRecord = {
       ...existing,
       email: {
@@ -100,7 +136,7 @@ export async function POST(request: NextRequest) {
         status,
         confirmationToken,
         unsubscribeToken,
-        periods: periods ?? { weekly: false, monthly: false, yearly: false },
+        periods: normalizedPeriods,
         createdAt:
           isSameEmail && existing.email?.createdAt
             ? existing.email.createdAt
@@ -109,6 +145,9 @@ export async function POST(request: NextRequest) {
     };
 
     await kvSet(SUB_KEY(walletAddress), updated);
+
+    // Update period index
+    await syncPeriodIndex(walletAddress, previousPeriods, normalizedPeriods);
 
     if (!isAlreadyActive) {
       const baseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";

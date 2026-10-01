@@ -68,5 +68,37 @@ describe('indexer utils', () => {
       expect(isCacheValid(entry, 60)).toBe(false);
       expect(isCacheValid(entry, 30)).toBe(true);
     });
+
+    // The 60-minute window is the documented caching contract (issue #623).
+    // Testing only "well inside" and "well outside" leaves the boundary
+    // itself, where an off-by-one flips the behaviour, unverified.
+    describe('60-minute TTL boundary', () => {
+      const TTL_MS = CACHE_TTL_MINUTES * 60 * 1000;
+      const NOW = Date.parse('2026-09-25T12:00:00.000Z');
+
+      beforeEach(() => {
+        jest.useFakeTimers();
+        jest.setSystemTime(NOW);
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('is valid one millisecond inside the window', () => {
+        const entry = { result: {} as any, timestamp: NOW - (TTL_MS - 1) };
+        expect(isCacheValid(entry)).toBe(true);
+      });
+
+      it('is invalid at exactly the 60-minute boundary', () => {
+        const entry = { result: {} as any, timestamp: NOW - TTL_MS };
+        expect(isCacheValid(entry)).toBe(false);
+      });
+
+      it('is invalid one millisecond past the boundary', () => {
+        const entry = { result: {} as any, timestamp: NOW - (TTL_MS + 1) };
+        expect(isCacheValid(entry)).toBe(false);
+      });
+    });
   });
 });

@@ -4,6 +4,10 @@
  * 1 XLM = 10,000,000 Stroops (10^7).
  * Stellar limits and balances use a signed 64-bit integer internally.
  * Maximum valid amount: 922,337,203,685.4775807 (i64 max: 9223372036854775807 stroops).
+ *
+ * NOTE: This is the single canonical amount-conversion module. The former
+ * `src/utils/stellarAmounts.ts` (one character apart) has been merged into this
+ * file; all importers should reference `src/utils/stellarAmount` only.
  */
 
 export const STROOPS_PER_UNIT = 10_000_000n;

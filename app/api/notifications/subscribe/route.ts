@@ -4,9 +4,11 @@ import { logger } from "@/app/utils/logger";
 import {
   getClientIp,
   checkRateLimit,
-  rateLimitResponse,
+  rateLimitDenialResponse,
   SUBSCRIBE_IP_LIMIT,
   SUBSCRIBE_IP_WINDOW,
+  SUBSCRIBE_WALLET_LIMIT,
+  SUBSCRIBE_WALLET_WINDOW,
 } from "../_lib/rateLimit";
 import type { SubscriptionRecord, PeriodPrefs } from "@/app/types/notifications";
 import { apiError, internalApiError } from "@/app/api/_lib/apiError";
@@ -42,14 +44,16 @@ async function syncPeriodIndex(
 export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request);
-    const ipLimitResult = await checkRateLimit(
-      `ratelimit:ip:subscribe:${ip}`,
-      SUBSCRIBE_IP_LIMIT,
-      SUBSCRIBE_IP_WINDOW
+    const ipDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:ip:subscribe:${ip}`,
+        SUBSCRIBE_IP_LIMIT,
+        SUBSCRIBE_IP_WINDOW
+      ),
     );
 
-    if (!ipLimitResult.allowed) {
-      return rateLimitResponse(ipLimitResult.resetInSeconds);
+    if (ipDenial) {
+      return ipDenial;
     }
 
     const body = await request.json();
@@ -65,6 +69,20 @@ export async function POST(request: NextRequest) {
 
     if (!subscription?.endpoint) {
       return apiError("INVALID_PUSH_SUBSCRIPTION", "Invalid push subscription", 400);
+    }
+
+    // Keyed on the target wallet as well as the source IP: spreading a burst
+    // across many IPs must not let one wallet be subscribed arbitrarily often.
+    const walletDenial = rateLimitDenialResponse(
+      await checkRateLimit(
+        `ratelimit:wallet:subscribe:${walletAddress}`,
+        SUBSCRIBE_WALLET_LIMIT,
+        SUBSCRIBE_WALLET_WINDOW
+      )
+    );
+
+    if (walletDenial) {
+      return walletDenial;
     }
 
     const existing = (await kvGet<SubscriptionRecord>(SUB_KEY(walletAddress))) ?? {

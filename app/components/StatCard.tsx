@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useId } from "react";
 
 export type StatCardVariant = "primary" | "secondary";
 
@@ -27,29 +27,23 @@ export function StatCard({
   className = "",
   id,
 }: StatCardProps) {
-  const cardId = id || `stat-card-${label.toLowerCase().replace(/\s+/g, "-")}`;
+  const generatedId = useId().replace(/:/g, "");
+  const cardId = id || `stat-card-${label.toLowerCase().replace(/\s+/g, "-")}-${generatedId}`;
   const labelId = `${cardId}-label`;
   const valueId = `${cardId}-value`;
-  const descId = description ? `${cardId}-desc` : undefined;
+  const descId = description && !loading ? `${cardId}-desc` : undefined;
 
   const baseClasses =
-    "rounded-2xl border p-5 transition-all duration-200 focus-within:ring-2 focus-within:ring-theme-primary focus-within:ring-offset-2 focus-within:ring-offset-black";
+    "w-full min-w-0 rounded-2xl border p-4 sm:p-5 transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-theme-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
   const variantClasses: Record<StatCardVariant, string> = {
-    primary: "border-white/10 bg-white/5",
-    secondary: "border-white/5 bg-white/[0.02]",
+    primary: "border-foreground/10 bg-foreground/5",
+    secondary: "border-foreground/5 bg-foreground/[0.02]",
   };
 
-  const disabledClasses = disabled
-    ? "opacity-50 cursor-not-allowed"
-    : "cursor-default";
+  const disabledClasses = disabled ? "opacity-50 cursor-not-allowed" : "cursor-default";
 
-  const combinedClasses = [
-    baseClasses,
-    variantClasses[variant],
-    disabledClasses,
-    className,
-  ]
+  const combinedClasses = [baseClasses, variantClasses[variant], disabledClasses, className]
     .filter(Boolean)
     .join(" ");
 
@@ -63,9 +57,10 @@ export function StatCard({
       aria-labelledby={labelId}
       aria-describedby={descId}
       aria-disabled={disabled || loading}
+      aria-busy={loading}
       tabIndex={disabled ? -1 : 0}
     >
-      <div className="flex items-center gap-2 mb-2">
+      <div className="mb-2 flex items-center gap-2">
         {icon && (
           <span className="text-theme-primary" aria-hidden="true">
             {icon}
@@ -73,7 +68,7 @@ export function StatCard({
         )}
         <span
           id={labelId}
-          className="text-sm font-semibold text-white/60 uppercase tracking-wider"
+          className="text-foreground/70 text-sm font-semibold tracking-wider uppercase"
         >
           {label}
         </span>
@@ -81,20 +76,24 @@ export function StatCard({
 
       <p
         id={valueId}
-        className="text-2xl font-black text-white tabular-nums"
-        aria-live={loading ? "polite" : "off"}
+        className="text-foreground text-xl font-black break-words tabular-nums sm:text-2xl"
+        aria-live="polite"
       >
         {loading && (
           <span
-            className="inline-block w-4 h-4 border-2 border-white/70 border-t-transparent rounded-full animate-spin mr-2 align-middle"
+            className="border-foreground/70 mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent align-middle motion-reduce:animate-none"
             aria-hidden="true"
           />
         )}
-        <span className={loading ? "text-white/50" : undefined}>{displayValue}</span>
+        <span className={loading ? "text-foreground/70" : undefined}>{displayValue}</span>
       </p>
 
-      {description && !loading && (
-        <p id={descId} className="text-xs text-white/40 mt-1">
+      {description && (
+        <p
+          id={`${cardId}-desc`}
+          className={`text-foreground/70 mt-1 text-xs ${loading ? "invisible" : ""}`}
+          aria-hidden={loading}
+        >
           {description}
         </p>
       )}
